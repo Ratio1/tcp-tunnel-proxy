@@ -33,32 +33,32 @@ func TestParseClientHelloForSNIMissing(t *testing.T) {
 }
 
 func TestMaybeConsumeProxyHeaderVariants(t *testing.T) {
-	var consumed bytes.Buffer
+	var consumed []byte
 	proxyLine := "PROXY TCP4 1.1.1.1 2.2.2.2 1234 80\r\n"
 	reader := bufio.NewReader(strings.NewReader(proxyLine + "rest"))
 	if err := maybeConsumeProxyHeader(reader, &consumed); err != nil {
 		t.Fatalf("maybeConsumeProxyHeader v1 error: %v", err)
 	}
-	if consumed.String() != proxyLine {
-		t.Fatalf("proxy v1 consumed=%q, want %q", consumed.String(), proxyLine)
+	if string(consumed) != proxyLine {
+		t.Fatalf("proxy v1 consumed=%q, want %q", string(consumed), proxyLine)
 	}
 
-	consumed.Reset()
+	consumed = consumed[:0]
 	v2hdr := buildProxyV2Header()
 	reader = bufio.NewReader(bytes.NewReader(append(v2hdr, []byte("payload")...)))
 	if err := maybeConsumeProxyHeader(reader, &consumed); err != nil {
 		t.Fatalf("maybeConsumeProxyHeader v2 error: %v", err)
 	}
-	if got := consumed.Bytes(); !bytes.Equal(got, v2hdr) {
+	if got := consumed; !bytes.Equal(got, v2hdr) {
 		t.Fatalf("proxy v2 consumed=%x, want %x", got, v2hdr)
 	}
 
-	consumed.Reset()
+	consumed = consumed[:0]
 	reader = bufio.NewReader(strings.NewReader("HELLO"))
 	if err := maybeConsumeProxyHeader(reader, &consumed); err != nil {
 		t.Fatalf("maybeConsumeProxyHeader none error: %v", err)
 	}
-	if consumed.Len() != 0 {
+	if len(consumed) != 0 {
 		t.Fatalf("expected no bytes consumed without proxy header")
 	}
 }
@@ -70,7 +70,7 @@ func TestMaybeHandlePostgresSSLRequest(t *testing.T) {
 
 	conn := newMockConn(req)
 	reader := bufio.NewReader(bytes.NewReader(req))
-	var consumed bytes.Buffer
+	var consumed []byte
 	saw, err := maybeHandlePostgresSSLRequest(reader, &consumed, conn)
 	if err != nil {
 		t.Fatalf("maybeHandlePostgresSSLRequest error: %v", err)
@@ -78,8 +78,8 @@ func TestMaybeHandlePostgresSSLRequest(t *testing.T) {
 	if !saw {
 		t.Fatalf("expected SSLRequest to be detected")
 	}
-	if consumed.String() != string(req) {
-		t.Fatalf("consumed=%x, want %x", consumed.Bytes(), req)
+	if string(consumed) != string(req) {
+		t.Fatalf("consumed=%x, want %x", consumed, req)
 	}
 	if conn.writes.String() != "S" {
 		t.Fatalf("expected acceptance byte written, got %q", conn.writes.String())
@@ -90,7 +90,7 @@ func TestMaybeHandlePostgresSSLRequestIgnoresNonSSLRequest(t *testing.T) {
 	data := []byte{0, 0, 0, 8, 1, 2, 3, 4}
 	conn := newMockConn(data)
 	reader := bufio.NewReader(bytes.NewReader(data))
-	var consumed bytes.Buffer
+	var consumed []byte
 	saw, err := maybeHandlePostgresSSLRequest(reader, &consumed, conn)
 	if err != nil {
 		t.Fatalf("maybeHandlePostgresSSLRequest error: %v", err)

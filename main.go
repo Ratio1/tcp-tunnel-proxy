@@ -38,8 +38,13 @@ func handleConnection(conn net.Conn, manager *NodeManager) {
 	log.Printf("Incoming connection %s", remote)
 
 	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
-	sni, prelude, tlsInitial, sawPGSSLRequest, err := extractSNI(conn)
+	sni, buffers, sawPGSSLRequest, err := extractSNI(conn)
 	_ = conn.SetReadDeadline(time.Time{})
+	if buffers != nil {
+		defer func() {
+			putInitialBuffers(buffers)
+		}()
+	}
 	if err != nil {
 		log.Printf("SNI extraction failed for %s: %v (returning placeholder)", remote, err)
 		_, _ = conn.Write([]byte("OK\n"))
@@ -65,8 +70,8 @@ func handleConnection(conn net.Conn, manager *NodeManager) {
 
 	// Send PROXY + optional PostgreSQL SSLRequest first so we can observe the backend's SSL response,
 	// then stream the TLS ClientHello once the server has answered.
-	if len(prelude) > 0 {
-		if _, err := io.Copy(backendConn, bytes.NewReader(prelude)); err != nil {
+	if len(buffers.prelude) > 0 {
+		if err := writeAll(backendConn, buffers.prelude); err != nil {
 			log.Printf("failed to forward prelude bytes to backend for %s: %v", sni, err)
 			return
 		}
@@ -84,12 +89,14 @@ func handleConnection(conn net.Conn, manager *NodeManager) {
 	}
 
 	// Now deliver the TLS ClientHello (and any buffered bytes) to the backend before switching to streaming.
-	if len(tlsInitial) > 0 {
-		if _, err := io.Copy(backendConn, bytes.NewReader(tlsInitial)); err != nil {
+	if len(buffers.tlsInitial) > 0 {
+		if err := writeAll(backendConn, buffers.tlsInitial); err != nil {
 			log.Printf("failed to forward TLS initial bytes to backend for %s: %v", sni, err)
 			return
 		}
 	}
+	putInitialBuffers(buffers)
+	buffers = nil
 
 	log.Printf("Proxying %s -> %s via %s", remote, sni, backendAddr)
 
@@ -120,4 +127,15 @@ func handleConnection(conn net.Conn, manager *NodeManager) {
 
 	wg.Wait()
 	log.Printf("Connection closed for %s (%s)", remote, sni)
+}
+
+func writeAll(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		if err != nil {
+			return err
+		}
+		data = data[n:]
+	}
+	return nil
 }

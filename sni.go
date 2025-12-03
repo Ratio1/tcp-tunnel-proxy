@@ -9,67 +9,134 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
+const (
+	defaultPreludeCap = 512
+	defaultTLSCap     = 4096
+	maxPreludeCap     = 8192
+	maxTLSCap         = 65536
+)
+
+type initialBuffers struct {
+	prelude    []byte
+	tlsInitial []byte
+}
+
+var (
+	initialBufPool = sync.Pool{
+		New: func() any {
+			return &initialBuffers{
+				prelude:    make([]byte, 0, defaultPreludeCap),
+				tlsInitial: make([]byte, 0, defaultTLSCap),
+			}
+		},
+	}
+	readerPool = sync.Pool{
+		New: func() any {
+			return bufio.NewReaderSize(nil, 4096)
+		},
+	}
+)
+
+func getInitialBuffers() *initialBuffers {
+	bufs := initialBufPool.Get().(*initialBuffers)
+	bufs.prelude = bufs.prelude[:0]
+	bufs.tlsInitial = bufs.tlsInitial[:0]
+	return bufs
+}
+
+func putInitialBuffers(bufs *initialBuffers) {
+	if bufs == nil {
+		return
+	}
+	if cap(bufs.prelude) > maxPreludeCap {
+		bufs.prelude = make([]byte, 0, defaultPreludeCap)
+	} else {
+		bufs.prelude = bufs.prelude[:0]
+	}
+	if cap(bufs.tlsInitial) > maxTLSCap {
+		bufs.tlsInitial = make([]byte, 0, defaultTLSCap)
+	} else {
+		bufs.tlsInitial = bufs.tlsInitial[:0]
+	}
+	initialBufPool.Put(bufs)
+}
+
+func getReader(conn net.Conn) *bufio.Reader {
+	br := readerPool.Get().(*bufio.Reader)
+	br.Reset(conn)
+	return br
+}
+
+func putReader(br *bufio.Reader) {
+	if br == nil {
+		return
+	}
+	br.Reset(nil)
+	readerPool.Put(br)
+}
+
 // extractSNI reads the initial bytes (handling PROXY headers and PostgreSQL SSLRequest) and returns
 // the parsed SNI plus the bytes that must be replayed to the backend.
-func extractSNI(conn net.Conn) (string, []byte, []byte, bool, error) {
-	reader := bufio.NewReader(conn)
-	var prelude bytes.Buffer    // everything before TLS (PROXY/SSLRequest)
-	var tlsInitial bytes.Buffer // TLS record(s) consumed for SNI parsing
+func extractSNI(conn net.Conn) (string, *initialBuffers, bool, error) {
+	reader := getReader(conn)
+	defer putReader(reader)
+	bufs := getInitialBuffers() // holds prelude + TLS bytes to replay
 
-	if err := maybeConsumeProxyHeader(reader, &prelude); err != nil {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), false, err
+	if err := maybeConsumeProxyHeader(reader, &bufs.prelude); err != nil {
+		return "", bufs, false, err
 	}
 
-	sawPGSSLRequest, err := maybeHandlePostgresSSLRequest(reader, &prelude, conn)
+	sawPGSSLRequest, err := maybeHandlePostgresSSLRequest(reader, &bufs.prelude, conn)
 	if err != nil {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, err
+		return "", bufs, sawPGSSLRequest, err
 	}
 
 	header := make([]byte, 5)
 	if _, err := io.ReadFull(reader, header); err != nil {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, fmt.Errorf("reading TLS header: %w", err)
+		return "", bufs, sawPGSSLRequest, fmt.Errorf("reading TLS header: %w", err)
 	}
-	tlsInitial.Write(header)
+	bufs.tlsInitial = append(bufs.tlsInitial, header...)
 
 	if header[0] != 0x16 { // TLS Handshake
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, errors.New("not a TLS handshake record")
+		return "", bufs, sawPGSSLRequest, errors.New("not a TLS handshake record")
 	}
 
 	length := int(header[3])<<8 | int(header[4])
 	if length <= 0 || length > 1<<15 {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, fmt.Errorf("invalid TLS record length %d", length)
+		return "", bufs, sawPGSSLRequest, fmt.Errorf("invalid TLS record length %d", length)
 	}
 
 	body := make([]byte, length)
 	if _, err := io.ReadFull(reader, body); err != nil {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, fmt.Errorf("reading TLS body: %w", err)
+		return "", bufs, sawPGSSLRequest, fmt.Errorf("reading TLS body: %w", err)
 	}
-	tlsInitial.Write(body)
+	bufs.tlsInitial = append(bufs.tlsInitial, body...)
 
 	sni, err := parseClientHelloForSNI(body)
 	if err != nil {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, err
+		return "", bufs, sawPGSSLRequest, err
 	}
 	if sni == "" {
-		return "", prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, errors.New("no SNI present")
+		return "", bufs, sawPGSSLRequest, errors.New("no SNI present")
 	}
 
 	// Preserve any bytes bufio.Reader has already pulled from the socket so the backend sees an unbroken stream.
 	if buffered := reader.Buffered(); buffered > 0 {
 		extra := make([]byte, buffered)
 		if _, err := io.ReadFull(reader, extra); err == nil {
-			tlsInitial.Write(extra)
+			bufs.tlsInitial = append(bufs.tlsInitial, extra...)
 		}
 	}
 
-	return sni, prelude.Bytes(), tlsInitial.Bytes(), sawPGSSLRequest, nil
+	return sni, bufs, sawPGSSLRequest, nil
 }
 
 // maybeHandlePostgresSSLRequest consumes a PostgreSQL SSLRequest prefix (if present) and sends the acceptance byte.
-func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *bytes.Buffer, conn net.Conn) (bool, error) {
+func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.Conn) (bool, error) {
 	const sslRequestLen = 8
 
 	peek, err := r.Peek(sslRequestLen)
@@ -98,7 +165,7 @@ func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *bytes.Buffer, conn
 	if _, err := io.ReadFull(r, req); err != nil {
 		return true, fmt.Errorf("read postgres SSLRequest: %w", err)
 	}
-	consumed.Write(req)
+	*consumed = append(*consumed, req...)
 
 	if _, err := conn.Write([]byte{'S'}); err != nil {
 		return true, fmt.Errorf("write postgres SSL response: %w", err)
@@ -129,7 +196,7 @@ func consumeBackendPostgresSSLResponse(conn net.Conn) ([]byte, error) {
 }
 
 // maybeConsumeProxyHeader consumes PROXY protocol v1/v2 headers if present.
-func maybeConsumeProxyHeader(r *bufio.Reader, consumed *bytes.Buffer) error {
+func maybeConsumeProxyHeader(r *bufio.Reader, consumed *[]byte) error {
 	const proxyV2Len = 12
 	sig, err := r.Peek(proxyV2Len)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
@@ -148,7 +215,7 @@ func maybeConsumeProxyHeader(r *bufio.Reader, consumed *bytes.Buffer) error {
 		if len(line) > 107 { // spec limit plus CRLF
 			return errors.New("proxy v1 header too long")
 		}
-		consumed.WriteString(line)
+		*consumed = append(*consumed, line...)
 		return nil
 	}
 
@@ -159,14 +226,14 @@ func maybeConsumeProxyHeader(r *bufio.Reader, consumed *bytes.Buffer) error {
 		if _, err := io.ReadFull(r, hdr); err != nil {
 			return fmt.Errorf("read proxy v2 header: %w", err)
 		}
-		consumed.Write(hdr)
+		*consumed = append(*consumed, hdr...)
 		addrLen := int(binary.BigEndian.Uint16(hdr[14:16]))
 		if addrLen > 0 {
 			addr := make([]byte, addrLen)
 			if _, err := io.ReadFull(r, addr); err != nil {
 				return fmt.Errorf("read proxy v2 address block: %w", err)
 			}
-			consumed.Write(addr)
+			*consumed = append(*consumed, addr...)
 		}
 		return nil
 	}
