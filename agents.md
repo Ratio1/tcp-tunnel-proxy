@@ -25,6 +25,10 @@
 -   Requires `cloudflared` on PATH. Startup wait is `startupTimeout`; idle teardown uses `idleTimeout`.
 -   Restart logic: if cloudflared exits while refcount > 0, manager attempts restart.
 
+## Development Practices
+
+-   Add or update automated tests for every new function or feature; keep coverage for SNI parsing, port management, and tunnel lifecycle helpers in sync with changes.
+
 ## TODO / Follow-ups
 
 -   Replace the temporary SNI-failure `OK` response with proper rejection once debugging is done.
