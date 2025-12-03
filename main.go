@@ -17,15 +17,14 @@ import (
 
 // NodeConfig defines how to reach a backend node through cloudflared.
 type NodeConfig struct {
-	Hostname  string
-	LocalPort int
+	Hostname string
 }
 
 // nodeConfigs maps incoming SNI hostnames to backend nodes.
 // Update this map to match your environment.
 var nodeConfigs = map[string]NodeConfig{
-	"tcpproxyspectrum.ratio1.link":  {Hostname: "2c6c395cdbd9.ratio1.link", LocalPort: 15001},
-	"service.customer2.example.com": {Hostname: "node2.internal.example.com", LocalPort: 15002},
+	"tcpproxyspectrum.ratio1.link":  {Hostname: "2c6c395cdbd9.ratio1.link"},
+	"service.customer2.example.com": {Hostname: "node2.internal.example.com"},
 }
 
 const (
@@ -33,6 +32,8 @@ const (
 	idleTimeout      = 300 * time.Second
 	startupTimeout   = 15 * time.Second
 	readHelloTimeout = 10 * time.Second
+	portRangeStart   = 20000
+	portRangeEnd     = 20100
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 		log.Fatalf("node configuration map is empty")
 	}
 
-	manager := NewNodeManager(nodeConfigs, idleTimeout, startupTimeout)
+	manager := NewNodeManager(nodeConfigs, idleTimeout, startupTimeout, portRangeStart, portRangeEnd)
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", listenAddr, err)
@@ -410,13 +411,55 @@ func parseClientHelloForSNI(record []byte) (string, error) {
 	return "", errors.New("SNI not found in ClientHello")
 }
 
+type portPool struct {
+	mu    sync.Mutex
+	start int
+	end   int
+	used  map[int]bool
+}
+
+func newPortPool(start, end int) *portPool {
+	return &portPool{
+		start: start,
+		end:   end,
+		used:  make(map[int]bool),
+	}
+}
+
+func (p *portPool) reserve() (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for port := p.start; port <= p.end; port++ {
+		if p.used[port] {
+			continue
+		}
+		if !isPortAvailable(port) {
+			continue
+		}
+		p.used[port] = true
+		return port, nil
+	}
+	return 0, fmt.Errorf("no free ports in range %d-%d", p.start, p.end)
+}
+
+func (p *portPool) release(port int) {
+	if port == 0 {
+		return
+	}
+	p.mu.Lock()
+	delete(p.used, port)
+	p.mu.Unlock()
+}
+
 // NodeManager tracks cloudflared tunnels per node and manages lifecycles.
 type NodeManager struct {
 	mu             sync.Mutex
 	config         map[string]NodeConfig
-	nodes          map[string]*nodeState
+	nodes          map[string]*nodeState // keyed by backend hostname
 	idleTimeout    time.Duration
 	startupTimeout time.Duration
+	ports          *portPool
 }
 
 type nodeState struct {
@@ -427,15 +470,20 @@ type nodeState struct {
 	idleTimer *time.Timer
 	ready     chan struct{}
 	startErr  error
+	port      int
 }
 
 // NewNodeManager constructs a manager with the provided node mapping and timeouts.
-func NewNodeManager(cfg map[string]NodeConfig, idle, startup time.Duration) *NodeManager {
+func NewNodeManager(cfg map[string]NodeConfig, idle, startup time.Duration, portStart, portEnd int) *NodeManager {
+	if portStart <= 0 || portEnd < portStart {
+		log.Fatalf("invalid port pool range %d-%d", portStart, portEnd)
+	}
 	return &NodeManager{
 		config:         cfg,
 		nodes:          make(map[string]*nodeState),
 		idleTimeout:    idle,
 		startupTimeout: startup,
+		ports:          newPortPool(portStart, portEnd),
 	}
 }
 
@@ -446,11 +494,12 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 		return 0, fmt.Errorf("no backend configured for %s", sni)
 	}
 
+	hostname := cfg.Hostname
 	m.mu.Lock()
-	st, ok := m.nodes[sni]
+	st, ok := m.nodes[hostname]
 	if !ok {
 		st = &nodeState{cfg: cfg}
-		m.nodes[sni] = st
+		m.nodes[hostname] = st
 	}
 	st.refCount++
 
@@ -464,7 +513,7 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 		if ready == nil {
 			ready = make(chan struct{})
 			st.ready = ready
-			go m.launchTunnel(sni, st, ready)
+			go m.launchTunnel(hostname, st, ready)
 		}
 	}
 	m.mu.Unlock()
@@ -475,19 +524,30 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 
 	m.mu.Lock()
 	err := st.startErr
+	port := st.port
 	m.mu.Unlock()
 
 	if err != nil {
 		m.Release(sni)
 		return 0, err
 	}
-	return cfg.LocalPort, nil
+	if port == 0 {
+		m.Release(sni)
+		return 0, fmt.Errorf("no port assigned for %s", hostname)
+	}
+	return port, nil
 }
 
 // Release decrements the refcount for a node and schedules tunnel teardown if idle.
 func (m *NodeManager) Release(sni string) {
+	cfg, ok := m.config[sni]
+	if !ok {
+		return
+	}
+	hostname := cfg.Hostname
+
 	m.mu.Lock()
-	st, ok := m.nodes[sni]
+	st, ok := m.nodes[hostname]
 	if !ok {
 		m.mu.Unlock()
 		return
@@ -499,36 +559,63 @@ func (m *NodeManager) Release(sni string) {
 
 	if st.refCount == 0 && st.idleTimer == nil {
 		st.idleTimer = time.AfterFunc(m.idleTimeout, func() {
-			m.stopNode(sni)
+			m.stopNode(hostname)
 		})
 	}
 	m.mu.Unlock()
 }
 
-func (m *NodeManager) launchTunnel(sni string, st *nodeState, ready chan struct{}) {
+func (m *NodeManager) launchTunnel(hostname string, st *nodeState, ready chan struct{}) {
+	m.mu.Lock()
+	port := st.port
+	m.mu.Unlock()
+
+	if port == 0 {
+		var err error
+		port, err = m.ports.reserve()
+		if err != nil {
+			log.Printf("failed to reserve port for %s: %v", hostname, err)
+			m.mu.Lock()
+			st.startErr = err
+			if st.ready == ready {
+				close(ready)
+				st.ready = nil
+			}
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Lock()
+		st.port = port
+		m.mu.Unlock()
+	}
+
 	cfg := st.cfg
-	log.Printf("Starting cloudflared for %s -> %s (local %d)", sni, cfg.Hostname, cfg.LocalPort)
+	log.Printf("Starting cloudflared for %s -> %s (local %d)", hostname, cfg.Hostname, port)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "cloudflared", "access", "tcp", "--hostname", cfg.Hostname, "--url", fmt.Sprintf("localhost:%d", cfg.LocalPort))
+	cmd := exec.CommandContext(ctx, "cloudflared", "access", "tcp", "--hostname", cfg.Hostname, "--url", fmt.Sprintf("localhost:%d", port))
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("failed to start cloudflared for %s: %v", sni, err)
+		log.Printf("failed to start cloudflared for %s: %v", hostname, err)
 		m.mu.Lock()
 		st.startErr = err
+		st.cmd = nil
+		st.cancel = nil
+		st.port = 0
 		if st.ready == ready {
 			close(ready)
 			st.ready = nil
 		}
 		m.mu.Unlock()
+		m.ports.release(port)
 		return
 	}
 
-	go streamPipe(stdout, fmt.Sprintf("[%s][cloudflared][stdout]", sni))
-	go streamPipe(stderr, fmt.Sprintf("[%s][cloudflared][stderr]", sni))
+	go streamPipe(stdout, fmt.Sprintf("[%s][cloudflared][stdout]", hostname))
+	go streamPipe(stderr, fmt.Sprintf("[%s][cloudflared][stderr]", hostname))
 
 	m.mu.Lock()
 	st.cmd = cmd
@@ -536,9 +623,9 @@ func (m *NodeManager) launchTunnel(sni string, st *nodeState, ready chan struct{
 	st.startErr = nil
 	m.mu.Unlock()
 
-	err := waitForPort(ctx, "127.0.0.1", cfg.LocalPort, m.startupTimeout)
+	err := waitForPort(ctx, "127.0.0.1", port, m.startupTimeout)
 	if err != nil {
-		log.Printf("cloudflared for %s did not become ready: %v", sni, err)
+		log.Printf("cloudflared for %s did not become ready: %v", hostname, err)
 		cancel()
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
@@ -546,11 +633,13 @@ func (m *NodeManager) launchTunnel(sni string, st *nodeState, ready chan struct{
 		st.cmd = nil
 		st.cancel = nil
 		st.startErr = err
+		st.port = 0
 		if st.ready == ready {
 			close(ready)
 			st.ready = nil
 		}
 		m.mu.Unlock()
+		m.ports.release(port)
 		return
 	}
 
@@ -562,12 +651,12 @@ func (m *NodeManager) launchTunnel(sni string, st *nodeState, ready chan struct{
 	go func() {
 		err := cmd.Wait()
 		cancel()
-		log.Printf("cloudflared for %s exited: %v", sni, err)
-		m.handleProcessExit(sni, st, err)
+		log.Printf("cloudflared for %s exited: %v", hostname, err)
+		m.handleProcessExit(hostname, st, err)
 	}()
 }
 
-func (m *NodeManager) handleProcessExit(sni string, st *nodeState, err error) {
+func (m *NodeManager) handleProcessExit(hostname string, st *nodeState, err error) {
 	m.mu.Lock()
 	active := st.refCount
 	st.cmd = nil
@@ -577,22 +666,22 @@ func (m *NodeManager) handleProcessExit(sni string, st *nodeState, err error) {
 	m.mu.Unlock()
 
 	if active > 0 {
-		log.Printf("Restarting cloudflared for %s (active connections: %d)", sni, active)
+		log.Printf("Restarting cloudflared for %s (active connections: %d)", hostname, active)
 		m.mu.Lock()
 		if st.ready == nil && st.cmd == nil {
 			st.ready = make(chan struct{})
 			ready := st.ready
 			m.mu.Unlock()
-			go m.launchTunnel(sni, st, ready)
+			go m.launchTunnel(hostname, st, ready)
 		} else {
 			m.mu.Unlock()
 		}
 	}
 }
 
-func (m *NodeManager) stopNode(sni string) {
+func (m *NodeManager) stopNode(hostname string) {
 	m.mu.Lock()
-	st, ok := m.nodes[sni]
+	st, ok := m.nodes[hostname]
 	if !ok {
 		m.mu.Unlock()
 		return
@@ -603,20 +692,25 @@ func (m *NodeManager) stopNode(sni string) {
 	}
 	cmd := st.cmd
 	cancel := st.cancel
+	port := st.port
 	st.cmd = nil
 	st.cancel = nil
 	st.ready = nil
 	st.startErr = fmt.Errorf("tunnel stopped")
 	st.idleTimer = nil
+	st.port = 0
 	m.mu.Unlock()
 
-	log.Printf("Stopping cloudflared for %s due to idleness", sni)
+	log.Printf("Stopping cloudflared for %s due to idleness", hostname)
 	if cancel != nil {
 		cancel()
 	}
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
+	}
+	if port != 0 {
+		m.ports.release(port)
 	}
 }
 
@@ -639,6 +733,18 @@ func waitForPort(ctx context.Context, host string, port int, timeout time.Durati
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
+}
+
+func isPortAvailable(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 func streamPipe(r io.ReadCloser, prefix string) {
