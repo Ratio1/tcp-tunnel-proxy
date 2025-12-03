@@ -56,7 +56,6 @@ func (p *portPool) release(port int) {
 // NodeManager tracks cloudflared tunnels per backend hostname and manages lifecycles.
 type NodeManager struct {
 	mu             sync.Mutex
-	config         map[string]NodeConfig
 	nodes          map[string]*nodeState // keyed by backend hostname
 	idleTimeout    time.Duration
 	startupTimeout time.Duration
@@ -64,7 +63,7 @@ type NodeManager struct {
 }
 
 type nodeState struct {
-	cfg       NodeConfig
+	hostname  string
 	cmd       *exec.Cmd
 	cancel    context.CancelFunc
 	refCount  int
@@ -74,13 +73,12 @@ type nodeState struct {
 	port      int
 }
 
-// NewNodeManager constructs a manager with the provided node mapping and timeouts.
-func NewNodeManager(cfg map[string]NodeConfig, idle, startup time.Duration, portStart, portEnd int) *NodeManager {
+// NewNodeManager constructs a manager with the provided timeouts.
+func NewNodeManager(idle, startup time.Duration, portStart, portEnd int) *NodeManager {
 	if portStart <= 0 || portEnd < portStart {
 		log.Fatalf("invalid port pool range %d-%d", portStart, portEnd)
 	}
 	return &NodeManager{
-		config:         cfg,
 		nodes:          make(map[string]*nodeState),
 		idleTimeout:    idle,
 		startupTimeout: startup,
@@ -90,16 +88,15 @@ func NewNodeManager(cfg map[string]NodeConfig, idle, startup time.Duration, port
 
 // GetOrStart ensures a tunnel for the given SNI is running and returns its local port.
 func (m *NodeManager) GetOrStart(sni string) (int, error) {
-	cfg, ok := m.config[sni]
-	if !ok {
-		return 0, fmt.Errorf("no backend configured for %s", sni)
+	hostname, err := deriveValidatedTunnelHostname(sni)
+	if err != nil {
+		return 0, err
 	}
 
-	hostname := cfg.Hostname
 	m.mu.Lock()
 	st, ok := m.nodes[hostname]
 	if !ok {
-		st = &nodeState{cfg: cfg}
+		st = &nodeState{hostname: hostname}
 		m.nodes[hostname] = st
 	}
 	st.refCount++
@@ -114,7 +111,7 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 		if ready == nil {
 			ready = make(chan struct{})
 			st.ready = ready
-			go m.launchTunnel(hostname, st, ready)
+			go m.launchTunnel(st, ready)
 		}
 	}
 	m.mu.Unlock()
@@ -124,7 +121,7 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 	}
 
 	m.mu.Lock()
-	err := st.startErr
+	err = st.startErr
 	port := st.port
 	m.mu.Unlock()
 
@@ -141,11 +138,10 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 
 // Release decrements the refcount for a node and schedules tunnel teardown if idle.
 func (m *NodeManager) Release(sni string) {
-	cfg, ok := m.config[sni]
-	if !ok {
+	hostname, err := deriveValidatedTunnelHostname(sni)
+	if err != nil {
 		return
 	}
-	hostname := cfg.Hostname
 
 	m.mu.Lock()
 	st, ok := m.nodes[hostname]
@@ -166,7 +162,8 @@ func (m *NodeManager) Release(sni string) {
 	m.mu.Unlock()
 }
 
-func (m *NodeManager) launchTunnel(hostname string, st *nodeState, ready chan struct{}) {
+func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
+	hostname := st.hostname
 	m.mu.Lock()
 	port := st.port
 	m.mu.Unlock()
@@ -190,11 +187,10 @@ func (m *NodeManager) launchTunnel(hostname string, st *nodeState, ready chan st
 		m.mu.Unlock()
 	}
 
-	cfg := st.cfg
 	log.Printf("Starting cloudflared for %s on %d", hostname, port)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "cloudflared", "access", "tcp", "--hostname", cfg.Hostname, "--url", fmt.Sprintf("localhost:%d", port))
+	cmd := exec.CommandContext(ctx, "cloudflared", "access", "tcp", "--hostname", hostname, "--url", fmt.Sprintf("localhost:%d", port))
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -253,11 +249,12 @@ func (m *NodeManager) launchTunnel(hostname string, st *nodeState, ready chan st
 		err := cmd.Wait()
 		cancel()
 		log.Printf("cloudflared exited for %s: %v", hostname, err)
-		m.handleProcessExit(hostname, st, err)
+		m.handleProcessExit(st, err)
 	}()
 }
 
-func (m *NodeManager) handleProcessExit(hostname string, st *nodeState, err error) {
+func (m *NodeManager) handleProcessExit(st *nodeState, err error) {
+	hostname := st.hostname
 	m.mu.Lock()
 	active := st.refCount
 	st.cmd = nil
@@ -273,7 +270,7 @@ func (m *NodeManager) handleProcessExit(hostname string, st *nodeState, err erro
 			st.ready = make(chan struct{})
 			ready := st.ready
 			m.mu.Unlock()
-			go m.launchTunnel(hostname, st, ready)
+			go m.launchTunnel(st, ready)
 		} else {
 			m.mu.Unlock()
 		}

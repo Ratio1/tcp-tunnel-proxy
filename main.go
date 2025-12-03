@@ -12,11 +12,7 @@ import (
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	if len(nodeConfigs) == 0 {
-		log.Fatalf("node configuration map is empty")
-	}
-
-	manager := NewNodeManager(nodeConfigs, idleTimeout, startupTimeout, portRangeStart, portRangeEnd)
+	manager := NewNodeManager(idleTimeout, startupTimeout, portRangeStart, portRangeEnd)
 
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {

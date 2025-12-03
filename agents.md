@@ -1,7 +1,7 @@
 ## What This App Does
 
 -   Dynamic TCP routing oracle on `:19000`. Uses TLS SNI to choose a backend, spins up `cloudflared access tcp` on demand, and pipes raw TCP bytes end-to-end.
--   Tunnels are keyed by backend hostname (from `NodeConfig`); SNI → backend mapping is in `nodeConfigs`. Multiple SNI entries can point at the same backend hostname and will share a tunnel.
+ -   Tunnels are keyed by a derived backend hostname: prefix `cft-` to the incoming SNI and replace its first `.` with `-` (e.g., `db-123.ratio1.link` → `cft-db-123.ratio1.link`). No static map or external lookup is used.
 -   Local ports for cloudflared are **dynamically** reserved from a pool (`portRangeStart`–`portRangeEnd`); no per-node static port in config anymore.
 
 ## Connection Handling
@@ -13,7 +13,7 @@
 
 ## Files / Structure
 
--   `config.go`: constants (listen address, timeouts, port pool) and `nodeConfigs` map (`SNI -> NodeConfig{Hostname}`).
+-   `config.go`: constants (listen address, timeouts, port pool) plus hostname derivation/validation helpers.
 -   `sni.go`: PROXY/SSLRequest handling, TLS ClientHello parsing for SNI, backend Postgres SSL response consumption.
 -   `node_manager.go`: port pool, tunnel lifecycle (start/restart/idle shutdown), refcounting, readiness wait, cloudflared logging.
 -   `main.go`: listener and per-connection flow.
@@ -21,11 +21,12 @@
 
 ## Operational Notes
 
+-   Everything should be optimized to handle many connections, be fast, and have very small overhead time.
 -   Requires `cloudflared` on PATH. Startup wait is `startupTimeout`; idle teardown uses `idleTimeout`.
 -   Restart logic: if cloudflared exits while refcount > 0, manager attempts restart.
 
 ## TODO / Follow-ups
 
 -   Replace the temporary SNI-failure `OK` response with proper rejection once debugging is done.
--   Update `README.md` to reflect dynamic port pool and current file layout.
--   Consider exposing configuration via file/env instead of in-code map; add observability/metrics if needed.
+-   Update `README.md` to reflect dynamic port pool and current file layout. (Partially done; keep in sync with derivation rules.)
+-   Consider exposing configuration (timeouts/derivation rule) via file/env; add observability/metrics if needed.
