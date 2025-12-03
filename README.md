@@ -21,6 +21,11 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
     ```
 4. Clients connect over TLS with SNI set (e.g., `psql "postgres://service.customer1.example.com:19000/db?sslmode=require"`). Non-TLS/no-SNI currently get an `OK` and close (temporary behavior).
 
+## Downloads
+
+-   [Linux amd64](https://github.com/Ratio1/tcp-tunnel-proxy/releases/latest/download/tcp-tunnel-proxy-linux-amd64.tar.gz)
+-   [Linux arm64](https://github.com/Ratio1/tcp-tunnel-proxy/releases/latest/download/tcp-tunnel-proxy-linux-arm64.tar.gz)
+
 ## Behavior Notes
 
 -   PROXY protocol: If a load balancer prepends PROXY v1/v2, it is consumed and forwarded to the backend.

@@ -1,0 +1,78 @@
+name: Release Packages
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+          cache: true
+
+      - name: Build linux ${{ matrix.goarch }} binary
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=${{ matrix.goarch }} go build -o dist/tcp-tunnel-proxy-linux-${{ matrix.goarch }}
+
+      - name: Create archive
+        run: |
+          cd dist
+          tar -czf tcp-tunnel-proxy-linux-${{ matrix.goarch }}.tar.gz tcp-tunnel-proxy-linux-${{ matrix.goarch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tcp-tunnel-proxy-linux-${{ matrix.goarch }}
+          path: dist/tcp-tunnel-proxy-linux-${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tcp-tunnel-proxy-linux-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub release and upload assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: main-${{ github.run_number }}
+          name: Main build #${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          files: dist/tcp-tunnel-proxy-linux-*.tar.gz
+          generate_release_notes: true
