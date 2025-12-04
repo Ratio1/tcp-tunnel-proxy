@@ -24,6 +24,7 @@ const (
 	envReadHello      = "READ_HELLO_TIMEOUT"
 	envPortRangeStart = "PORT_RANGE_START"
 	envPortRangeEnd   = "PORT_RANGE_END"
+	envLogFormat      = "LOG_FORMAT"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 	ReadHelloTimeout = defaultReadHelloTimeout
 	PortRangeStart   = defaultPortRangeStart
 	PortRangeEnd     = defaultPortRangeEnd
+	LogFormat        = "plain" // plain | json
 )
 
 // LoadConfigENV overrides defaults from environment variables when provided.
@@ -85,5 +87,16 @@ func LoadConfigENV() {
 		log.Printf("Invalid port range order %d-%d; resetting to defaults %d-%d", PortRangeStart, PortRangeEnd, defaultPortRangeStart, defaultPortRangeEnd)
 		PortRangeStart = defaultPortRangeStart
 		PortRangeEnd = defaultPortRangeEnd
+	}
+
+	if v := strings.TrimSpace(os.Getenv(envLogFormat)); v != "" {
+		switch strings.ToLower(v) {
+		case "json":
+			LogFormat = "json"
+		case "plain":
+			LogFormat = "plain"
+		default:
+			log.Printf("Invalid LOG_FORMAT %q, keeping default %s", v, LogFormat)
+		}
 	}
 }

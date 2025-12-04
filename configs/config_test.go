@@ -25,6 +25,9 @@ func TestLoadConfigENVDefaults(t *testing.T) {
 	if PortRangeStart != defaultPortRangeStart || PortRangeEnd != defaultPortRangeEnd {
 		t.Fatalf("PortRange: got %d-%d, want %d-%d", PortRangeStart, PortRangeEnd, defaultPortRangeStart, defaultPortRangeEnd)
 	}
+	if LogFormat != "plain" {
+		t.Fatalf("LogFormat: got %q, want %q", LogFormat, "plain")
+	}
 }
 
 func TestLoadConfigENVOverrides(t *testing.T) {
@@ -35,6 +38,7 @@ func TestLoadConfigENVOverrides(t *testing.T) {
 	t.Setenv(envReadHello, "3s")
 	t.Setenv(envPortRangeStart, "25000")
 	t.Setenv(envPortRangeEnd, "25010")
+	t.Setenv(envLogFormat, "json")
 
 	LoadConfigENV()
 
@@ -53,6 +57,9 @@ func TestLoadConfigENVOverrides(t *testing.T) {
 	if PortRangeStart != 25000 || PortRangeEnd != 25010 {
 		t.Fatalf("PortRange override failed, got %d-%d", PortRangeStart, PortRangeEnd)
 	}
+	if LogFormat != "json" {
+		t.Fatalf("LogFormat override failed, got %q", LogFormat)
+	}
 }
 
 func TestLoadConfigENVInvalidValues(t *testing.T) {
@@ -61,6 +68,7 @@ func TestLoadConfigENVInvalidValues(t *testing.T) {
 	t.Setenv(envReadHello, "-1s")
 	t.Setenv(envPortRangeStart, "30000")
 	t.Setenv(envPortRangeEnd, "20000") // end < start triggers reset
+	t.Setenv(envLogFormat, "xml")
 
 	LoadConfigENV()
 
@@ -73,6 +81,9 @@ func TestLoadConfigENVInvalidValues(t *testing.T) {
 	if PortRangeStart != defaultPortRangeStart || PortRangeEnd != defaultPortRangeEnd {
 		t.Fatalf("Port range should reset to defaults on invalid order, got %d-%d", PortRangeStart, PortRangeEnd)
 	}
+	if LogFormat != "plain" {
+		t.Fatalf("LogFormat should remain default on invalid, got %q", LogFormat)
+	}
 }
 
 func unsetAllEnv(t *testing.T) {
@@ -83,4 +94,5 @@ func unsetAllEnv(t *testing.T) {
 	os.Unsetenv(envReadHello)
 	os.Unsetenv(envPortRangeStart)
 	os.Unsetenv(envPortRangeEnd)
+	os.Unsetenv(envLogFormat)
 }

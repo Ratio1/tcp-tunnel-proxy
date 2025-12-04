@@ -21,16 +21,16 @@ func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager) {
 
 	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
 	sni, buffers, sawPGSSLRequest, err := extractSNI(conn)
+	if err != nil {
+		log.Printf("SNI extraction failed for %s: %v (closing connection)", remote, err)
+		return
+	}
+
 	_ = conn.SetReadDeadline(time.Time{})
 	if buffers != nil {
 		defer func() {
 			putInitialBuffers(buffers)
 		}()
-	}
-	if err != nil {
-		log.Printf("SNI extraction failed for %s: %v (returning placeholder)", remote, err)
-		_, _ = conn.Write([]byte("OK\n"))
-		return
 	}
 
 	log.Printf("Resolved %s as SNI=%s", remote, sni)

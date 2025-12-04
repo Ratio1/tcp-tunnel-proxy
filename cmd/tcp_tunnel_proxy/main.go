@@ -6,11 +6,12 @@ import (
 	"tcp-tunnel-proxy/configs"
 	cloudflaredmanager "tcp-tunnel-proxy/internal/cloudflared_manager"
 	connectionhandler "tcp-tunnel-proxy/internal/connection_handler"
+	"tcp-tunnel-proxy/internal/logging"
 )
 
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	configs.LoadConfigENV()
+	logging.Setup()
 	manager := cloudflaredmanager.NewNodeManager()
 	ln, err := net.Listen("tcp", configs.ListenAddr)
 	if err != nil {
