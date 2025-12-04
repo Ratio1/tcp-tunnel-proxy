@@ -38,6 +38,15 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 -   `listenAddr`, `idleTimeout`, `startupTimeout`, `readHelloTimeout` constants in `main.go`.
 -   Hostname derivation rule lives in `deriveTunnelHostname` (prefix `cft-`, replace the first dot with `-`); adjust if you need a different mapping pattern.
 
+### Environment Variables
+
+-   `LISTEN_ADDR`: address to listen on (e.g., `:19000`, `127.0.0.1:19000`).
+-   `IDLE_TIMEOUT`: duration before idle tunnels are torn down (e.g., `300s`).
+-   `STARTUP_TIMEOUT`: how long to wait for `cloudflared` to become ready (e.g., `15s`).
+-   `READ_HELLO_TIMEOUT`: how long to wait for client TLS prelude/SNI (e.g., `10s`).
+-   `PORT_RANGE_START` / `PORT_RANGE_END`: dynamic local port pool for `cloudflared`.
+-   `LOG_FORMAT`: `plain` (default) or `json` logging.
+
 ## Caveats / TODO
 
 -   Temporary SNI failure handling sends `OK\n` instead of rejecting; switch to reject for production.

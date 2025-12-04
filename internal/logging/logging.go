@@ -7,13 +7,11 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"tcp-tunnel-proxy/configs"
 )
 
-// Setup configures the global logger based on configs.LogFormat.
-func Setup() {
-	if strings.EqualFold(configs.LogFormat, "json") {
+// Setup configures the global logger based on the provided format ("plain" or "json").
+func Setup(format string) {
+	if strings.EqualFold(format, "json") {
 		log.SetFlags(0)
 		log.SetOutput(&jsonWriter{out: os.Stdout})
 		return

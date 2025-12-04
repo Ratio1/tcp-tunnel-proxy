@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"sync"
-	"tcp-tunnel-proxy/configs"
 	"time"
 )
 
@@ -82,7 +81,7 @@ func putReader(br *bufio.Reader) {
 
 // extractSNI reads the initial bytes (handling PROXY headers and PostgreSQL SSLRequest) and returns
 // the parsed SNI plus the bytes that must be replayed to the backend.
-func extractSNI(conn net.Conn) (string, *initialBuffers, bool, error) {
+func extractSNI(conn net.Conn, readHelloTimeout time.Duration) (string, *initialBuffers, bool, error) {
 	reader := getReader(conn)
 	defer putReader(reader)
 	bufs := getInitialBuffers() // holds prelude + TLS bytes to replay
@@ -91,7 +90,7 @@ func extractSNI(conn net.Conn) (string, *initialBuffers, bool, error) {
 		return "", bufs, false, err
 	}
 
-	sawPGSSLRequest, err := maybeHandlePostgresSSLRequest(reader, &bufs.prelude, conn)
+	sawPGSSLRequest, err := maybeHandlePostgresSSLRequest(reader, &bufs.prelude, conn, readHelloTimeout)
 	if err != nil {
 		return "", bufs, sawPGSSLRequest, err
 	}
@@ -137,7 +136,7 @@ func extractSNI(conn net.Conn) (string, *initialBuffers, bool, error) {
 }
 
 // maybeHandlePostgresSSLRequest consumes a PostgreSQL SSLRequest prefix (if present) and sends the acceptance byte.
-func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.Conn) (bool, error) {
+func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.Conn, readHelloTimeout time.Duration) (bool, error) {
 	const sslRequestLen = 8
 
 	peek, err := r.Peek(sslRequestLen)
@@ -172,15 +171,15 @@ func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.C
 		return true, fmt.Errorf("write postgres SSL response: %w", err)
 	}
 	// Give the client a fresh window to send the subsequent TLS ClientHello.
-	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
 	return true, nil
 }
 
 // consumeBackendPostgresSSLResponse reads the backend's single-byte SSL response so we can inject it before TLS bytes.
-func consumeBackendPostgresSSLResponse(conn net.Conn) ([]byte, error) {
+func consumeBackendPostgresSSLResponse(conn net.Conn, readHelloTimeout time.Duration) ([]byte, error) {
 	var buf [1]byte
 
-	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
 	n, err := conn.Read(buf[:])
 	_ = conn.SetReadDeadline(time.Time{})
 

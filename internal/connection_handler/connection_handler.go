@@ -7,31 +7,31 @@ import (
 	"log"
 	"net"
 	"sync"
-	"tcp-tunnel-proxy/configs"
 	cloudflaredmanager "tcp-tunnel-proxy/internal/cloudflared_manager"
 	"time"
 )
 
 // handleConnection drives a single client flow: extract SNI, prepare tunnel, and proxy bytes.
-func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager) {
+func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager, readHelloTimeout time.Duration) {
 	defer conn.Close()
 
 	remote := conn.RemoteAddr().String()
 	log.Printf("Incoming connection %s", remote)
 
-	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
-	sni, buffers, sawPGSSLRequest, err := extractSNI(conn)
-	if err != nil {
-		log.Printf("SNI extraction failed for %s: %v (closing connection)", remote, err)
-		return
-	}
-
-	_ = conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
+	sni, buffers, sawPGSSLRequest, err := extractSNI(conn, readHelloTimeout)
 	if buffers != nil {
 		defer func() {
 			putInitialBuffers(buffers)
 		}()
 	}
+	if err != nil {
+		_ = conn.SetReadDeadline(time.Time{})
+		log.Printf("SNI extraction failed for %s: %v (closing connection)", remote, err)
+		return
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Time{})
 
 	log.Printf("Resolved %s as SNI=%s", remote, sni)
 
@@ -61,7 +61,7 @@ func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager) {
 
 	var backendReader io.Reader = backendConn
 	if sawPGSSLRequest {
-		prefix, err := consumeBackendPostgresSSLResponse(backendConn)
+		prefix, err := consumeBackendPostgresSSLResponse(backendConn, readHelloTimeout)
 		if err != nil {
 			log.Printf("backend Postgres SSL response read failed for %s: %v", sni, err)
 		}

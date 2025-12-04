@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"sync"
 	"time"
-
-	"tcp-tunnel-proxy/configs"
 )
 
 type portPool struct {
@@ -84,58 +82,8 @@ type Config struct {
 	PortRangeEnd   int
 }
 
-// Option overrides a specific configuration value.
-type Option func(*Config)
-
-// WithIdleTimeout sets the idle timeout override.
-func WithIdleTimeout(d time.Duration) Option {
-	return func(cfg *Config) {
-		cfg.IdleTimeout = d
-	}
-}
-
-// WithStartupTimeout sets the startup timeout override.
-func WithStartupTimeout(d time.Duration) Option {
-	return func(cfg *Config) {
-		cfg.StartupTimeout = d
-	}
-}
-
-// WithPortRange sets the port range override.
-func WithPortRange(start, end int) Option {
-	return func(cfg *Config) {
-		cfg.PortRangeStart = start
-		cfg.PortRangeEnd = end
-	}
-}
-
-/*
-NewNodeManager constructs a manager using config defaults, then applies any overrides.
-
-	_exanpleManager1 := cloudflaredmanager.NewNodeManager(cloudflaredmanager.WithIdleTimeout(time.Duration(1)))
-
-or
-
-	_exanpleManager2 := cloudflaredmanager.NewNodeManager(cloudflaredmanager.WithPortRange(10, 100))
-
-or
-
-	_exanpleManager3 := cloudflaredmanager.NewNodeManager(cloudflaredmanager.WithStartupTimeout(time.Duration(1)))
-
-or
-any combination of the above parameters.
-*/
-func NewNodeManager(opts ...Option) *NodeManager {
-	cfg := Config{
-		IdleTimeout:    configs.IdleTimeout,
-		StartupTimeout: configs.StartupTimeout,
-		PortRangeStart: configs.PortRangeStart,
-		PortRangeEnd:   configs.PortRangeEnd,
-	}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
+// NewNodeManager constructs a manager using the provided configuration, then applies overrides.
+func NewNodeManager(cfg Config) *NodeManager {
 	if cfg.PortRangeStart <= 0 || cfg.PortRangeEnd < cfg.PortRangeStart {
 		log.Fatalf("invalid port pool range %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
 	}

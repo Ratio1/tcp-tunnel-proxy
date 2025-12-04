@@ -16,17 +16,25 @@ import (
 )
 
 func main() {
-	configs.LoadConfigENV()
-	logging.Setup()
-	manager := cloudflaredmanager.NewNodeManager()
+	cfg, err := configs.LoadConfigFromEnv()
+	if err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+	logging.Setup(cfg.LogFormat)
+	manager := cloudflaredmanager.NewNodeManager(cloudflaredmanager.Config{
+		IdleTimeout:    cfg.IdleTimeout,
+		StartupTimeout: cfg.StartupTimeout,
+		PortRangeStart: cfg.PortRangeStart,
+		PortRangeEnd:   cfg.PortRangeEnd,
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ln, err := net.Listen("tcp", configs.ListenAddr)
+	ln, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", configs.ListenAddr, err)
+		log.Fatalf("failed to listen on %s: %v", cfg.ListenAddr, err)
 	}
-	log.Printf("Routing oracle listening on %s", configs.ListenAddr)
+	log.Printf("Routing oracle listening on %s", cfg.ListenAddr)
 
 	var shutdownOnce sync.Once
 	shutdown := func(reason string) {
@@ -66,7 +74,7 @@ func main() {
 		wg.Add(1)
 		go func(c net.Conn) {
 			defer wg.Done()
-			connectionhandler.HandleConnection(c, manager)
+			connectionhandler.HandleConnection(c, manager, cfg.ReadHelloTimeout)
 		}(conn)
 	}
 

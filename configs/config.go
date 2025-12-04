@@ -1,12 +1,24 @@
 package configs
 
 import (
-	"log"
+	"errors"
+	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
+
+type Config struct {
+	ListenAddr       string
+	IdleTimeout      time.Duration
+	StartupTimeout   time.Duration
+	ReadHelloTimeout time.Duration
+	PortRangeStart   int
+	PortRangeEnd     int
+	LogFormat        string // plain | json
+}
 
 const (
 	defaultListenAddr       = ":19000"
@@ -15,6 +27,7 @@ const (
 	defaultReadHelloTimeout = 10 * time.Second
 	defaultPortRangeStart   = 20000
 	defaultPortRangeEnd     = 20100
+	defaultLogFormat        = "plain"
 )
 
 const (
@@ -27,76 +40,117 @@ const (
 	envLogFormat      = "LOG_FORMAT"
 )
 
-var (
-	ListenAddr       = defaultListenAddr
-	IdleTimeout      = defaultIdleTimeout
-	StartupTimeout   = defaultStartupTimeout
-	ReadHelloTimeout = defaultReadHelloTimeout
-	PortRangeStart   = defaultPortRangeStart
-	PortRangeEnd     = defaultPortRangeEnd
-	LogFormat        = "plain" // plain | json
-)
+// LoadConfigFromEnv returns configuration populated from environment variables, falling back to defaults.
+// It returns validation/parse errors so callers can decide how to handle them.
+func LoadConfigFromEnv() (Config, error) {
+	cfg := Config{
+		ListenAddr:       defaultListenAddr,
+		IdleTimeout:      defaultIdleTimeout,
+		StartupTimeout:   defaultStartupTimeout,
+		ReadHelloTimeout: defaultReadHelloTimeout,
+		PortRangeStart:   defaultPortRangeStart,
+		PortRangeEnd:     defaultPortRangeEnd,
+		LogFormat:        defaultLogFormat,
+	}
 
-// LoadConfigENV overrides defaults from environment variables when provided.
-func LoadConfigENV() {
+	var errs []error
+
 	if v := strings.TrimSpace(os.Getenv(envListenAddr)); v != "" {
-		ListenAddr = v
+		cfg.ListenAddr = v
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envIdleTimeout)); v != "" {
-		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
-			log.Printf("Invalid IDLE_TIMEOUT %q, keeping default %s: %v", v, IdleTimeout, err)
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envIdleTimeout, v, err))
 		} else {
-			IdleTimeout = d
+			cfg.IdleTimeout = d
 		}
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envStartupTimeout)); v != "" {
-		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
-			log.Printf("Invalid STARTUP_TIMEOUT %q, keeping default %s: %v", v, StartupTimeout, err)
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envStartupTimeout, v, err))
 		} else {
-			StartupTimeout = d
+			cfg.StartupTimeout = d
 		}
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envReadHello)); v != "" {
-		if d, err := time.ParseDuration(v); err != nil || d <= 0 {
-			log.Printf("Invalid READ_HELLO_TIMEOUT %q, keeping default %s: %v", v, ReadHelloTimeout, err)
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envReadHello, v, err))
 		} else {
-			ReadHelloTimeout = d
+			cfg.ReadHelloTimeout = d
 		}
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envPortRangeStart)); v != "" {
-		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
-			log.Printf("Invalid PORT_RANGE_START %q, keeping default %d: %v", v, PortRangeStart, err)
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envPortRangeStart, v, err))
 		} else {
-			PortRangeStart = n
+			cfg.PortRangeStart = n
 		}
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envPortRangeEnd)); v != "" {
-		if n, err := strconv.Atoi(v); err != nil || n <= 0 {
-			log.Printf("Invalid PORT_RANGE_END %q, keeping default %d: %v", v, PortRangeEnd, err)
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envPortRangeEnd, v, err))
 		} else {
-			PortRangeEnd = n
+			cfg.PortRangeEnd = n
 		}
-	}
-
-	if PortRangeEnd < PortRangeStart {
-		log.Printf("Invalid port range order %d-%d; resetting to defaults %d-%d", PortRangeStart, PortRangeEnd, defaultPortRangeStart, defaultPortRangeEnd)
-		PortRangeStart = defaultPortRangeStart
-		PortRangeEnd = defaultPortRangeEnd
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envLogFormat)); v != "" {
 		switch strings.ToLower(v) {
-		case "json":
-			LogFormat = "json"
-		case "plain":
-			LogFormat = "plain"
+		case "plain", "json":
+			cfg.LogFormat = v
 		default:
-			log.Printf("Invalid LOG_FORMAT %q, keeping default %s", v, LogFormat)
+			errs = append(errs, fmt.Errorf("invalid %s: %q (must be plain|json)", envLogFormat, v))
 		}
 	}
+
+	if err := validateConfig(&cfg); err != nil {
+		errs = append(errs, err)
+	}
+
+	return cfg, errors.Join(errs...)
+}
+
+func validateConfig(cfg *Config) error {
+	var errs []error
+
+	if _, err := net.ResolveTCPAddr("tcp", cfg.ListenAddr); err != nil {
+		errs = append(errs, fmt.Errorf("invalid listen address %q: %w", cfg.ListenAddr, err))
+		cfg.ListenAddr = defaultListenAddr
+	}
+	if cfg.IdleTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("idle timeout must be positive, got %s", cfg.IdleTimeout))
+		cfg.IdleTimeout = defaultIdleTimeout
+	}
+	if cfg.StartupTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("startup timeout must be positive, got %s", cfg.StartupTimeout))
+		cfg.StartupTimeout = defaultStartupTimeout
+	}
+	if cfg.ReadHelloTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("read hello timeout must be positive, got %s", cfg.ReadHelloTimeout))
+		cfg.ReadHelloTimeout = defaultReadHelloTimeout
+	}
+	if cfg.PortRangeStart <= 0 {
+		errs = append(errs, fmt.Errorf("port range start must be positive, got %d", cfg.PortRangeStart))
+		cfg.PortRangeStart = defaultPortRangeStart
+	}
+	if cfg.PortRangeEnd <= 0 || cfg.PortRangeEnd < cfg.PortRangeStart {
+		errs = append(errs, fmt.Errorf("port range end must be >= start, got %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd))
+		cfg.PortRangeStart = defaultPortRangeStart
+		cfg.PortRangeEnd = defaultPortRangeEnd
+	}
+	if cfg.LogFormat == "" {
+		cfg.LogFormat = defaultLogFormat
+	}
+
+	return errors.Join(errs...)
 }

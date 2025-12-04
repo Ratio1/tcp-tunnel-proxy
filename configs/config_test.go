@@ -6,32 +6,35 @@ import (
 	"time"
 )
 
-func TestLoadConfigENVDefaults(t *testing.T) {
-	resetState(t)
-	LoadConfigENV()
+func TestLoadConfigDefaults(t *testing.T) {
+	unsetAllEnv(t)
+	cfg, err := LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("expected no error for defaults, got %v", err)
+	}
 
-	if ListenAddr != defaultListenAddr {
-		t.Fatalf("ListenAddr: got %q, want %q", ListenAddr, defaultListenAddr)
+	if cfg.ListenAddr != defaultListenAddr {
+		t.Fatalf("ListenAddr: got %q, want %q", cfg.ListenAddr, defaultListenAddr)
 	}
-	if IdleTimeout != defaultIdleTimeout {
-		t.Fatalf("IdleTimeout: got %v, want %v", IdleTimeout, defaultIdleTimeout)
+	if cfg.IdleTimeout != defaultIdleTimeout {
+		t.Fatalf("IdleTimeout: got %v, want %v", cfg.IdleTimeout, defaultIdleTimeout)
 	}
-	if StartupTimeout != defaultStartupTimeout {
-		t.Fatalf("StartupTimeout: got %v, want %v", StartupTimeout, defaultStartupTimeout)
+	if cfg.StartupTimeout != defaultStartupTimeout {
+		t.Fatalf("StartupTimeout: got %v, want %v", cfg.StartupTimeout, defaultStartupTimeout)
 	}
-	if ReadHelloTimeout != defaultReadHelloTimeout {
-		t.Fatalf("ReadHelloTimeout: got %v, want %v", ReadHelloTimeout, defaultReadHelloTimeout)
+	if cfg.ReadHelloTimeout != defaultReadHelloTimeout {
+		t.Fatalf("ReadHelloTimeout: got %v, want %v", cfg.ReadHelloTimeout, defaultReadHelloTimeout)
 	}
-	if PortRangeStart != defaultPortRangeStart || PortRangeEnd != defaultPortRangeEnd {
-		t.Fatalf("PortRange: got %d-%d, want %d-%d", PortRangeStart, PortRangeEnd, defaultPortRangeStart, defaultPortRangeEnd)
+	if cfg.PortRangeStart != defaultPortRangeStart || cfg.PortRangeEnd != defaultPortRangeEnd {
+		t.Fatalf("PortRange: got %d-%d, want %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd, defaultPortRangeStart, defaultPortRangeEnd)
 	}
-	if LogFormat != "plain" {
-		t.Fatalf("LogFormat: got %q, want %q", LogFormat, "plain")
+	if cfg.LogFormat != defaultLogFormat {
+		t.Fatalf("LogFormat: got %q, want %q", cfg.LogFormat, defaultLogFormat)
 	}
 }
 
-func TestLoadConfigENVOverrides(t *testing.T) {
-	resetState(t)
+func TestLoadConfigOverrides(t *testing.T) {
+	unsetAllEnv(t)
 	t.Setenv(envListenAddr, "127.0.0.1:12345")
 	t.Setenv(envIdleTimeout, "42s")
 	t.Setenv(envStartupTimeout, "5s")
@@ -40,66 +43,60 @@ func TestLoadConfigENVOverrides(t *testing.T) {
 	t.Setenv(envPortRangeEnd, "25010")
 	t.Setenv(envLogFormat, "json")
 
-	LoadConfigENV()
+	cfg, err := LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("expected no error for valid overrides, got %v", err)
+	}
 
-	if ListenAddr != "127.0.0.1:12345" {
-		t.Fatalf("ListenAddr override failed, got %q", ListenAddr)
+	if cfg.ListenAddr != "127.0.0.1:12345" {
+		t.Fatalf("ListenAddr override failed, got %q", cfg.ListenAddr)
 	}
-	if IdleTimeout != 42*time.Second {
-		t.Fatalf("IdleTimeout override failed, got %v", IdleTimeout)
+	if cfg.IdleTimeout != 42*time.Second {
+		t.Fatalf("IdleTimeout override failed, got %v", cfg.IdleTimeout)
 	}
-	if StartupTimeout != 5*time.Second {
-		t.Fatalf("StartupTimeout override failed, got %v", StartupTimeout)
+	if cfg.StartupTimeout != 5*time.Second {
+		t.Fatalf("StartupTimeout override failed, got %v", cfg.StartupTimeout)
 	}
-	if ReadHelloTimeout != 3*time.Second {
-		t.Fatalf("ReadHelloTimeout override failed, got %v", ReadHelloTimeout)
+	if cfg.ReadHelloTimeout != 3*time.Second {
+		t.Fatalf("ReadHelloTimeout override failed, got %v", cfg.ReadHelloTimeout)
 	}
-	if PortRangeStart != 25000 || PortRangeEnd != 25010 {
-		t.Fatalf("PortRange override failed, got %d-%d", PortRangeStart, PortRangeEnd)
+	if cfg.PortRangeStart != 25000 || cfg.PortRangeEnd != 25010 {
+		t.Fatalf("PortRange override failed, got %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
 	}
-	if LogFormat != "json" {
-		t.Fatalf("LogFormat override failed, got %q", LogFormat)
+	if cfg.LogFormat != "json" {
+		t.Fatalf("LogFormat override failed, got %q", cfg.LogFormat)
 	}
 }
 
-func TestLoadConfigENVInvalidValues(t *testing.T) {
-	resetState(t)
+func TestLoadConfigInvalidValues(t *testing.T) {
+	unsetAllEnv(t)
 	t.Setenv(envIdleTimeout, "bogus")
 	t.Setenv(envReadHello, "-1s")
 	t.Setenv(envPortRangeStart, "30000")
-	t.Setenv(envPortRangeEnd, "20000") // end < start triggers reset
+	t.Setenv(envPortRangeEnd, "20000") // end < start triggers validation error/reset
 	t.Setenv(envLogFormat, "xml")
+	t.Setenv(envListenAddr, "badaddr")
 
-	LoadConfigENV()
+	cfg, err := LoadConfigFromEnv()
+	if err == nil {
+		t.Fatalf("expected error for invalid env values")
+	}
 
-	if IdleTimeout != defaultIdleTimeout {
-		t.Fatalf("IdleTimeout should stay default on invalid, got %v", IdleTimeout)
+	if cfg.IdleTimeout != defaultIdleTimeout {
+		t.Fatalf("IdleTimeout should stay default on invalid, got %v", cfg.IdleTimeout)
 	}
-	if ReadHelloTimeout != defaultReadHelloTimeout {
-		t.Fatalf("ReadHelloTimeout should stay default on invalid, got %v", ReadHelloTimeout)
+	if cfg.ReadHelloTimeout != defaultReadHelloTimeout {
+		t.Fatalf("ReadHelloTimeout should stay default on invalid, got %v", cfg.ReadHelloTimeout)
 	}
-	if PortRangeStart != defaultPortRangeStart || PortRangeEnd != defaultPortRangeEnd {
-		t.Fatalf("Port range should reset to defaults on invalid order, got %d-%d", PortRangeStart, PortRangeEnd)
+	if cfg.PortRangeStart != defaultPortRangeStart || cfg.PortRangeEnd != defaultPortRangeEnd {
+		t.Fatalf("Port range should reset to defaults on invalid order, got %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
 	}
-	if LogFormat != "plain" {
-		t.Fatalf("LogFormat should remain default on invalid, got %q", LogFormat)
+	if cfg.LogFormat != defaultLogFormat {
+		t.Fatalf("LogFormat should remain default on invalid, got %q", cfg.LogFormat)
 	}
-}
-
-func resetState(t *testing.T) {
-	t.Helper()
-	resetConfigVars()
-	unsetAllEnv(t)
-}
-
-func resetConfigVars() {
-	ListenAddr = defaultListenAddr
-	IdleTimeout = defaultIdleTimeout
-	StartupTimeout = defaultStartupTimeout
-	ReadHelloTimeout = defaultReadHelloTimeout
-	PortRangeStart = defaultPortRangeStart
-	PortRangeEnd = defaultPortRangeEnd
-	LogFormat = "plain"
+	if cfg.ListenAddr != defaultListenAddr {
+		t.Fatalf("ListenAddr should reset to default on invalid, got %q", cfg.ListenAddr)
+	}
 }
 
 func unsetAllEnv(t *testing.T) {
