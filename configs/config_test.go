@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadConfigENVDefaults(t *testing.T) {
-	unsetAllEnv(t)
+	resetState(t)
 	LoadConfigENV()
 
 	if ListenAddr != defaultListenAddr {
@@ -31,7 +31,7 @@ func TestLoadConfigENVDefaults(t *testing.T) {
 }
 
 func TestLoadConfigENVOverrides(t *testing.T) {
-	unsetAllEnv(t)
+	resetState(t)
 	t.Setenv(envListenAddr, "127.0.0.1:12345")
 	t.Setenv(envIdleTimeout, "42s")
 	t.Setenv(envStartupTimeout, "5s")
@@ -63,7 +63,7 @@ func TestLoadConfigENVOverrides(t *testing.T) {
 }
 
 func TestLoadConfigENVInvalidValues(t *testing.T) {
-	unsetAllEnv(t)
+	resetState(t)
 	t.Setenv(envIdleTimeout, "bogus")
 	t.Setenv(envReadHello, "-1s")
 	t.Setenv(envPortRangeStart, "30000")
@@ -84,6 +84,22 @@ func TestLoadConfigENVInvalidValues(t *testing.T) {
 	if LogFormat != "plain" {
 		t.Fatalf("LogFormat should remain default on invalid, got %q", LogFormat)
 	}
+}
+
+func resetState(t *testing.T) {
+	t.Helper()
+	resetConfigVars()
+	unsetAllEnv(t)
+}
+
+func resetConfigVars() {
+	ListenAddr = defaultListenAddr
+	IdleTimeout = defaultIdleTimeout
+	StartupTimeout = defaultStartupTimeout
+	ReadHelloTimeout = defaultReadHelloTimeout
+	PortRangeStart = defaultPortRangeStart
+	PortRangeEnd = defaultPortRangeEnd
+	LogFormat = "plain"
 }
 
 func unsetAllEnv(t *testing.T) {
