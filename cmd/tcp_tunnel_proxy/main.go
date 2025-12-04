@@ -21,12 +21,15 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 	logging.Setup(cfg.LogFormat)
-	manager := cloudflaredmanager.NewNodeManager(cloudflaredmanager.Config{
+	manager, err := cloudflaredmanager.NewNodeManager(cloudflaredmanager.Config{
 		IdleTimeout:    cfg.IdleTimeout,
 		StartupTimeout: cfg.StartupTimeout,
 		PortRangeStart: cfg.PortRangeStart,
 		PortRangeEnd:   cfg.PortRangeEnd,
 	})
+	if err != nil {
+		log.Fatalf("failed to construct node manager: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

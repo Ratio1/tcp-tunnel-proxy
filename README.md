@@ -46,6 +46,8 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 -   `READ_HELLO_TIMEOUT`: how long to wait for client TLS prelude/SNI (e.g., `10s`).
 -   `PORT_RANGE_START` / `PORT_RANGE_END`: dynamic local port pool for `cloudflared`.
 -   `LOG_FORMAT`: `plain` (default) or `json` logging.
+-   `RESTART_BACKOFF`: base delay between restart attempts when cloudflared exits (default `2s`).
+-   `MAX_RESTARTS`: maximum restart attempts while connections are active (default `3`).
 
 ## Caveats / TODO
 

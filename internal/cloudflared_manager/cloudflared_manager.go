@@ -61,6 +61,8 @@ type NodeManager struct {
 	startupTimeout time.Duration
 	ports          *portPool
 	closed         bool
+	restartBackoff time.Duration
+	maxRestarts    int
 }
 
 type nodeState struct {
@@ -72,6 +74,7 @@ type nodeState struct {
 	ready     chan struct{}
 	startErr  error
 	port      int
+	restarts  int
 }
 
 // Config holds tunable settings for the node manager.
@@ -80,19 +83,33 @@ type Config struct {
 	StartupTimeout time.Duration
 	PortRangeStart int
 	PortRangeEnd   int
+	RestartBackoff time.Duration
+	MaxRestarts    int
 }
 
 // NewNodeManager constructs a manager using the provided configuration, then applies overrides.
-func NewNodeManager(cfg Config) *NodeManager {
+func NewNodeManager(cfg Config) (*NodeManager, error) {
 	if cfg.PortRangeStart <= 0 || cfg.PortRangeEnd < cfg.PortRangeStart {
-		log.Fatalf("invalid port pool range %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
+		return nil, fmt.Errorf("invalid port pool range %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
 	}
+	if cfg.IdleTimeout <= 0 || cfg.StartupTimeout <= 0 {
+		return nil, fmt.Errorf("timeouts must be positive")
+	}
+	if cfg.RestartBackoff <= 0 {
+		cfg.RestartBackoff = 2 * time.Second
+	}
+	if cfg.MaxRestarts <= 0 {
+		cfg.MaxRestarts = 3
+	}
+
 	return &NodeManager{
 		nodes:          make(map[string]*nodeState),
 		idleTimeout:    cfg.IdleTimeout,
 		startupTimeout: cfg.StartupTimeout,
 		ports:          newPortPool(cfg.PortRangeStart, cfg.PortRangeEnd),
-	}
+		restartBackoff: cfg.RestartBackoff,
+		maxRestarts:    cfg.MaxRestarts,
+	}, nil
 }
 
 // GetOrStart ensures a tunnel for the given SNI is running and returns its local port.
@@ -256,6 +273,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 
 	m.mu.Lock()
 	st.startErr = nil
+	st.restarts = 0
 	m.mu.Unlock()
 	close(ready)
 
@@ -275,19 +293,26 @@ func (m *NodeManager) handleProcessExit(st *nodeState, err error) {
 	st.cancel = nil
 	st.ready = nil
 	st.startErr = fmt.Errorf("tunnel exited: %v", err)
+	st.restarts++
+	restarts := st.restarts
 	m.mu.Unlock()
 
-	if active > 0 {
-		log.Printf("Restarting cloudflared for %s (active=%d)", hostname, active)
+	if active > 0 && restarts <= m.maxRestarts {
+		backoff := time.Duration(restarts) * m.restartBackoff
+		log.Printf("Restarting cloudflared for %s (active=%d, attempt=%d, backoff=%s)", hostname, active, restarts, backoff)
 		m.mu.Lock()
 		if st.ready == nil && st.cmd == nil {
 			st.ready = make(chan struct{})
 			ready := st.ready
 			m.mu.Unlock()
-			go m.launchTunnel(st, ready)
+			time.AfterFunc(backoff, func() {
+				m.launchTunnel(st, ready)
+			})
 		} else {
 			m.mu.Unlock()
 		}
+	} else if active > 0 {
+		log.Printf("Max restart attempts reached for %s; not restarting", hostname)
 	}
 }
 
@@ -313,13 +338,22 @@ func (m *NodeManager) stopNode(hostname string, force bool) {
 	st.port = 0
 	m.mu.Unlock()
 
-	log.Printf("Stopping cloudflared for %s (idle)", hostname)
+	log.Printf("Stopping cloudflared for %s (idle=%v)", hostname, force)
 	if cancel != nil {
 		cancel()
 	}
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
+		done := make(chan struct{})
+		go func() {
+			_, _ = cmd.Process.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = cmd.Process.Kill()
+			<-done
+		}
 	}
 	if port != 0 {
 		m.ports.release(port)

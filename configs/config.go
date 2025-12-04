@@ -18,6 +18,8 @@ type Config struct {
 	PortRangeStart   int
 	PortRangeEnd     int
 	LogFormat        string // plain | json
+	RestartBackoff   time.Duration
+	MaxRestarts      int
 }
 
 const (
@@ -28,6 +30,8 @@ const (
 	defaultPortRangeStart   = 20000
 	defaultPortRangeEnd     = 20100
 	defaultLogFormat        = "plain"
+	defaultRestartBackoff   = 2 * time.Second
+	defaultMaxRestarts      = 3
 )
 
 const (
@@ -38,6 +42,8 @@ const (
 	envPortRangeStart = "PORT_RANGE_START"
 	envPortRangeEnd   = "PORT_RANGE_END"
 	envLogFormat      = "LOG_FORMAT"
+	envRestartBackoff = "RESTART_BACKOFF"
+	envMaxRestarts    = "MAX_RESTARTS"
 )
 
 // LoadConfigFromEnv returns configuration populated from environment variables, falling back to defaults.
@@ -51,6 +57,8 @@ func LoadConfigFromEnv() (Config, error) {
 		PortRangeStart:   defaultPortRangeStart,
 		PortRangeEnd:     defaultPortRangeEnd,
 		LogFormat:        defaultLogFormat,
+		RestartBackoff:   defaultRestartBackoff,
+		MaxRestarts:      defaultMaxRestarts,
 	}
 
 	var errs []error
@@ -113,6 +121,24 @@ func LoadConfigFromEnv() (Config, error) {
 		}
 	}
 
+	if v := strings.TrimSpace(os.Getenv(envRestartBackoff)); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envRestartBackoff, v, err))
+		} else {
+			cfg.RestartBackoff = d
+		}
+	}
+
+	if v := strings.TrimSpace(os.Getenv(envMaxRestarts)); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envMaxRestarts, v, err))
+		} else {
+			cfg.MaxRestarts = n
+		}
+	}
+
 	if err := validateConfig(&cfg); err != nil {
 		errs = append(errs, err)
 	}
@@ -150,6 +176,14 @@ func validateConfig(cfg *Config) error {
 	}
 	if cfg.LogFormat == "" {
 		cfg.LogFormat = defaultLogFormat
+	}
+	if cfg.RestartBackoff <= 0 {
+		errs = append(errs, fmt.Errorf("restart backoff must be positive, got %s", cfg.RestartBackoff))
+		cfg.RestartBackoff = defaultRestartBackoff
+	}
+	if cfg.MaxRestarts <= 0 {
+		errs = append(errs, fmt.Errorf("max restarts must be positive, got %d", cfg.MaxRestarts))
+		cfg.MaxRestarts = defaultMaxRestarts
 	}
 
 	return errors.Join(errs...)

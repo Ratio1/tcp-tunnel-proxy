@@ -42,6 +42,8 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv(envPortRangeStart, "25000")
 	t.Setenv(envPortRangeEnd, "25010")
 	t.Setenv(envLogFormat, "json")
+	t.Setenv(envRestartBackoff, "1s")
+	t.Setenv(envMaxRestarts, "5")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -66,6 +68,12 @@ func TestLoadConfigOverrides(t *testing.T) {
 	if cfg.LogFormat != "json" {
 		t.Fatalf("LogFormat override failed, got %q", cfg.LogFormat)
 	}
+	if cfg.RestartBackoff != time.Second {
+		t.Fatalf("RestartBackoff override failed, got %v", cfg.RestartBackoff)
+	}
+	if cfg.MaxRestarts != 5 {
+		t.Fatalf("MaxRestarts override failed, got %d", cfg.MaxRestarts)
+	}
 }
 
 func TestLoadConfigInvalidValues(t *testing.T) {
@@ -76,6 +84,8 @@ func TestLoadConfigInvalidValues(t *testing.T) {
 	t.Setenv(envPortRangeEnd, "20000") // end < start triggers validation error/reset
 	t.Setenv(envLogFormat, "xml")
 	t.Setenv(envListenAddr, "badaddr")
+	t.Setenv(envRestartBackoff, "-1s")
+	t.Setenv(envMaxRestarts, "0")
 
 	cfg, err := LoadConfigFromEnv()
 	if err == nil {
@@ -97,6 +107,12 @@ func TestLoadConfigInvalidValues(t *testing.T) {
 	if cfg.ListenAddr != defaultListenAddr {
 		t.Fatalf("ListenAddr should reset to default on invalid, got %q", cfg.ListenAddr)
 	}
+	if cfg.RestartBackoff != defaultRestartBackoff {
+		t.Fatalf("RestartBackoff should reset to default on invalid, got %v", cfg.RestartBackoff)
+	}
+	if cfg.MaxRestarts != defaultMaxRestarts {
+		t.Fatalf("MaxRestarts should reset to default on invalid, got %d", cfg.MaxRestarts)
+	}
 }
 
 func unsetAllEnv(t *testing.T) {
@@ -108,4 +124,6 @@ func unsetAllEnv(t *testing.T) {
 	os.Unsetenv(envPortRangeStart)
 	os.Unsetenv(envPortRangeEnd)
 	os.Unsetenv(envLogFormat)
+	os.Unsetenv(envRestartBackoff)
+	os.Unsetenv(envMaxRestarts)
 }
