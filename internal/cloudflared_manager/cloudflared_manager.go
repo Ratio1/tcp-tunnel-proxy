@@ -5,11 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os/exec"
 	"sync"
 	"time"
+
+	"tcp-tunnel-proxy/internal/logging"
 )
 
 type portPool struct {
@@ -63,6 +64,7 @@ type NodeManager struct {
 	closed         bool
 	restartBackoff time.Duration
 	maxRestarts    int
+	logger         *logging.Logger
 }
 
 type nodeState struct {
@@ -109,6 +111,7 @@ func NewNodeManager(cfg Config) (*NodeManager, error) {
 		ports:          newPortPool(cfg.PortRangeStart, cfg.PortRangeEnd),
 		restartBackoff: cfg.RestartBackoff,
 		maxRestarts:    cfg.MaxRestarts,
+		logger:         logging.New("node_manager"),
 	}, nil
 }
 
@@ -202,7 +205,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 		var err error
 		port, err = m.ports.reserve()
 		if err != nil {
-			log.Printf("port reservation failed for %s: %v", hostname, err)
+			m.logger.Errorf("port reservation failed for %s: %v", hostname, err)
 			m.mu.Lock()
 			st.startErr = err
 			if st.ready == ready {
@@ -217,7 +220,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 		m.mu.Unlock()
 	}
 
-	log.Printf("Starting cloudflared for %s on %d", hostname, port)
+	m.logger.Infof("Starting cloudflared for %s on %d", hostname, port)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, "cloudflared", "access", "tcp", "--hostname", hostname, "--url", fmt.Sprintf("localhost:%d", port))
@@ -226,7 +229,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 	stderr, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("cloudflared start failed for %s: %v", hostname, err)
+		m.logger.Errorf("cloudflared start failed for %s: %v", hostname, err)
 		m.mu.Lock()
 		st.startErr = err
 		st.cmd = nil
@@ -242,8 +245,8 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 		return
 	}
 
-	go streamPipe(stdout, fmt.Sprintf("[%s][cloudflared][stdout]", hostname))
-	go streamPipe(stderr, fmt.Sprintf("[%s][cloudflared][stderr]", hostname))
+	go streamPipe(m.logger, stdout, fmt.Sprintf("[%s][cloudflared][stdout]", hostname))
+	go streamPipe(m.logger, stderr, fmt.Sprintf("[%s][cloudflared][stderr]", hostname))
 
 	m.mu.Lock()
 	st.cmd = cmd
@@ -253,7 +256,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 
 	err := waitForPort(ctx, "127.0.0.1", port, m.startupTimeout)
 	if err != nil {
-		log.Printf("cloudflared not ready for %s: %v", hostname, err)
+		m.logger.Errorf("cloudflared not ready for %s: %v", hostname, err)
 		cancel()
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
@@ -280,7 +283,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 	go func() {
 		err := cmd.Wait()
 		cancel()
-		log.Printf("cloudflared exited for %s: %v", hostname, err)
+		m.logger.Errorf("cloudflared exited for %s: %v", hostname, err)
 		m.handleProcessExit(st, err)
 	}()
 }
@@ -299,7 +302,7 @@ func (m *NodeManager) handleProcessExit(st *nodeState, err error) {
 
 	if active > 0 && restarts <= m.maxRestarts {
 		backoff := time.Duration(restarts) * m.restartBackoff
-		log.Printf("Restarting cloudflared for %s (active=%d, attempt=%d, backoff=%s)", hostname, active, restarts, backoff)
+		m.logger.Infof("Restarting cloudflared for %s (active=%d, attempt=%d, backoff=%s)", hostname, active, restarts, backoff)
 		m.mu.Lock()
 		if st.ready == nil && st.cmd == nil {
 			st.ready = make(chan struct{})
@@ -312,7 +315,7 @@ func (m *NodeManager) handleProcessExit(st *nodeState, err error) {
 			m.mu.Unlock()
 		}
 	} else if active > 0 {
-		log.Printf("Max restart attempts reached for %s; not restarting", hostname)
+		m.logger.Errorf("Max restart attempts reached for %s; not restarting", hostname)
 	}
 }
 
@@ -338,7 +341,7 @@ func (m *NodeManager) stopNode(hostname string, force bool) {
 	st.port = 0
 	m.mu.Unlock()
 
-	log.Printf("Stopping cloudflared for %s (idle=%v)", hostname, force)
+	m.logger.Infof("Stopping cloudflared for %s (idle=%v)", hostname, force)
 	if cancel != nil {
 		cancel()
 	}
@@ -416,14 +419,14 @@ func waitForPort(ctx context.Context, host string, port int, timeout time.Durati
 	}
 }
 
-func streamPipe(r io.ReadCloser, prefix string) {
+func streamPipe(logger *logging.Logger, r io.ReadCloser, prefix string) {
 	defer r.Close()
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		log.Printf("%s %s", prefix, scanner.Text())
+		logger.Infof("%s %s", prefix, scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("%s stream error: %v", prefix, err)
+		logger.Errorf("%s stream error: %v", prefix, err)
 	}
 }
 

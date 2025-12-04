@@ -21,6 +21,7 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 	logging.Setup(cfg.LogFormat)
+	logger := logging.New("main")
 	manager, err := cloudflaredmanager.NewNodeManager(cloudflaredmanager.Config{
 		IdleTimeout:    cfg.IdleTimeout,
 		StartupTimeout: cfg.StartupTimeout,
@@ -35,14 +36,15 @@ func main() {
 
 	ln, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", cfg.ListenAddr, err)
+		logger.Errorf("failed to listen on %s: %v", cfg.ListenAddr, err)
+		return
 	}
-	log.Printf("Routing oracle listening on %s", cfg.ListenAddr)
+	logger.Infof("Routing oracle listening on %s", cfg.ListenAddr)
 
 	var shutdownOnce sync.Once
 	shutdown := func(reason string) {
 		shutdownOnce.Do(func() {
-			log.Printf("Shutting down: %s", reason)
+			logger.Infof("Shutting down: %s", reason)
 			cancel()
 			_ = ln.Close()
 			manager.Shutdown(context.Background())
@@ -68,7 +70,7 @@ func main() {
 				break
 			}
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				log.Printf("accept timeout: %v", err)
+				logger.Errorf("accept timeout: %v", err)
 				continue
 			}
 			shutdown("listener error")
@@ -77,7 +79,7 @@ func main() {
 		wg.Add(1)
 		go func(c net.Conn) {
 			defer wg.Done()
-			connectionhandler.HandleConnection(c, manager, cfg.ReadHelloTimeout)
+			connectionhandler.HandleConnection(c, manager, cfg.ReadHelloTimeout, logging.New("connection"))
 		}(conn)
 	}
 

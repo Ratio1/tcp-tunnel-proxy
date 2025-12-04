@@ -7,10 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
+
+	"tcp-tunnel-proxy/internal/logging"
 )
 
 const (
@@ -26,6 +27,7 @@ type initialBuffers struct {
 }
 
 var (
+	logger         = logging.New("sni")
 	initialBufPool = sync.Pool{
 		New: func() any {
 			return &initialBuffers{
@@ -160,7 +162,7 @@ func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.C
 		return false, nil
 	}
 
-	log.Printf("PostgreSQL SSLRequest detected; responding with acceptance")
+	logger.Infof("PostgreSQL SSLRequest detected; responding with acceptance")
 	req := make([]byte, sslRequestLen)
 	if _, err := io.ReadFull(r, req); err != nil {
 		return true, fmt.Errorf("read postgres SSLRequest: %w", err)
@@ -187,11 +189,11 @@ func consumeBackendPostgresSSLResponse(conn net.Conn, readHelloTimeout time.Dura
 		return nil, err
 	}
 	if buf[0] == 'S' {
-		log.Printf("Backend Postgres SSL response: accepted TLS (S)")
+		logger.Infof("Backend Postgres SSL response: accepted TLS (S)")
 		return nil, err
 	}
 
-	log.Printf("Backend Postgres first byte after SSLRequest: 0x%02x (%q)", buf[0], buf[0])
+	logger.Infof("Backend Postgres first byte after SSLRequest: 0x%02x (%q)", buf[0], buf[0])
 	return buf[:1], err
 }
 
