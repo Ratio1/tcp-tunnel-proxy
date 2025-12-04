@@ -340,3 +340,27 @@ func parseClientHelloForSNI(record []byte) (string, error) {
 
 	return "", errors.New("SNI not found in ClientHello")
 }
+
+// TLS alert constants (subset) for sending minimal alerts on parse failures.
+const (
+	alertLevelFatal        = 2
+	alertUnrecognizedName  = 112
+	tlsAlertContentType    = 21
+	tlsVersion12Major      = 0x03
+	tlsVersion12Minor      = 0x03
+	tlsAlertRecordBodySize = 2
+)
+
+// sendTLSAlert writes a minimal TLS alert to the connection and returns any error encountered.
+// This is best-effort and does not close the connection; caller should close after.
+func sendTLSAlert(conn net.Conn, alertDescription byte) error {
+	alert := []byte{
+		tlsAlertContentType,
+		tlsVersion12Major, tlsVersion12Minor,
+		0x00, tlsAlertRecordBodySize,
+		alertLevelFatal,
+		alertDescription,
+	}
+	_, err := conn.Write(alert)
+	return err
+}

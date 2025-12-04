@@ -28,6 +28,9 @@ func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager, re
 	if err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
 		log.Printf("SNI extraction failed for %s: %v (closing connection)", remote, err)
+		if tlsErr := sendTLSAlert(conn, alertUnrecognizedName); tlsErr != nil {
+			log.Printf("failed to send TLS alert to %s: %v", remote, tlsErr)
+		}
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
