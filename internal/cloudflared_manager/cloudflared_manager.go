@@ -62,6 +62,7 @@ type NodeManager struct {
 	idleTimeout    time.Duration
 	startupTimeout time.Duration
 	ports          *portPool
+	closed         bool
 }
 
 type nodeState struct {
@@ -154,6 +155,10 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 	}
 
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("node manager shutting down")
+	}
 	st, ok := m.nodes[hostname]
 	if !ok {
 		st = &nodeState{hostname: hostname}
@@ -216,7 +221,7 @@ func (m *NodeManager) Release(sni string) {
 
 	if st.refCount == 0 && st.idleTimer == nil {
 		st.idleTimer = time.AfterFunc(m.idleTimeout, func() {
-			m.stopNode(hostname)
+			m.stopNode(hostname, false)
 		})
 	}
 	m.mu.Unlock()
@@ -338,14 +343,14 @@ func (m *NodeManager) handleProcessExit(st *nodeState, err error) {
 	}
 }
 
-func (m *NodeManager) stopNode(hostname string) {
+func (m *NodeManager) stopNode(hostname string, force bool) {
 	m.mu.Lock()
 	st, ok := m.nodes[hostname]
 	if !ok {
 		m.mu.Unlock()
 		return
 	}
-	if st.refCount > 0 {
+	if st.refCount > 0 && !force {
 		m.mu.Unlock()
 		return
 	}
@@ -370,6 +375,41 @@ func (m *NodeManager) stopNode(hostname string) {
 	}
 	if port != 0 {
 		m.ports.release(port)
+	}
+}
+
+// Shutdown stops accepting new tunnels and tears down all running nodes.
+func (m *NodeManager) Shutdown(ctx context.Context) {
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.closed = true
+	hostnames := make([]string, 0, len(m.nodes))
+	for h := range m.nodes {
+		hostnames = append(hostnames, h)
+	}
+	m.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, h := range hostnames {
+		wg.Add(1)
+		go func(host string) {
+			defer wg.Done()
+			m.stopNode(host, true)
+		}(h)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
 	}
 }
 
