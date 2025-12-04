@@ -1,4 +1,4 @@
-package main
+package connectionhandler
 
 import (
 	"bytes"

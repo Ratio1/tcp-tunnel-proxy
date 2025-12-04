@@ -1,4 +1,4 @@
-package main
+package cloudflaredmanager
 
 import (
 	"bufio"
@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"tcp-tunnel-proxy/configs"
 )
 
 type portPool struct {
@@ -73,16 +75,74 @@ type nodeState struct {
 	port      int
 }
 
-// NewNodeManager constructs a manager with the provided timeouts.
-func NewNodeManager(idle, startup time.Duration, portStart, portEnd int) *NodeManager {
-	if portStart <= 0 || portEnd < portStart {
-		log.Fatalf("invalid port pool range %d-%d", portStart, portEnd)
+// Config holds tunable settings for the node manager.
+type Config struct {
+	IdleTimeout    time.Duration
+	StartupTimeout time.Duration
+	PortRangeStart int
+	PortRangeEnd   int
+}
+
+// Option overrides a specific configuration value.
+type Option func(*Config)
+
+// WithIdleTimeout sets the idle timeout override.
+func WithIdleTimeout(d time.Duration) Option {
+	return func(cfg *Config) {
+		cfg.IdleTimeout = d
+	}
+}
+
+// WithStartupTimeout sets the startup timeout override.
+func WithStartupTimeout(d time.Duration) Option {
+	return func(cfg *Config) {
+		cfg.StartupTimeout = d
+	}
+}
+
+// WithPortRange sets the port range override.
+func WithPortRange(start, end int) Option {
+	return func(cfg *Config) {
+		cfg.PortRangeStart = start
+		cfg.PortRangeEnd = end
+	}
+}
+
+/*
+NewNodeManager constructs a manager using config defaults, then applies any overrides.
+
+	_exanpleManager1 := cloudflaredmanager.NewNodeManager(cloudflaredmanager.WithIdleTimeout(time.Duration(1)))
+
+or
+
+	_exanpleManager2 := cloudflaredmanager.NewNodeManager(cloudflaredmanager.WithPortRange(10, 100))
+
+or
+
+	_exanpleManager3 := cloudflaredmanager.NewNodeManager(cloudflaredmanager.WithStartupTimeout(time.Duration(1)))
+
+or
+any combination of the above parameters.
+*/
+func NewNodeManager(opts ...Option) *NodeManager {
+	cfg := Config{
+		IdleTimeout:    configs.IdleTimeout,
+		StartupTimeout: configs.StartupTimeout,
+		PortRangeStart: configs.PortRangeStart,
+		PortRangeEnd:   configs.PortRangeEnd,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	if cfg.PortRangeStart <= 0 || cfg.PortRangeEnd < cfg.PortRangeStart {
+		log.Fatalf("invalid port pool range %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
 	}
 	return &NodeManager{
 		nodes:          make(map[string]*nodeState),
-		idleTimeout:    idle,
-		startupTimeout: startup,
-		ports:          newPortPool(portStart, portEnd),
+		idleTimeout:    cfg.IdleTimeout,
+		startupTimeout: cfg.StartupTimeout,
+		ports:          newPortPool(cfg.PortRangeStart, cfg.PortRangeEnd),
 	}
 }
 
@@ -208,6 +268,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 		}
 		m.mu.Unlock()
 		m.ports.release(port)
+		cancel()
 		return
 	}
 

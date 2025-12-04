@@ -1,4 +1,4 @@
-package main
+package connectionhandler
 
 import (
 	"bufio"
@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"tcp-tunnel-proxy/configs"
 	"time"
 )
 
@@ -171,7 +172,7 @@ func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.C
 		return true, fmt.Errorf("write postgres SSL response: %w", err)
 	}
 	// Give the client a fresh window to send the subsequent TLS ClientHello.
-	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
 	return true, nil
 }
 
@@ -179,7 +180,7 @@ func maybeHandlePostgresSSLRequest(r *bufio.Reader, consumed *[]byte, conn net.C
 func consumeBackendPostgresSSLResponse(conn net.Conn) ([]byte, error) {
 	var buf [1]byte
 
-	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
 	n, err := conn.Read(buf[:])
 	_ = conn.SetReadDeadline(time.Time{})
 

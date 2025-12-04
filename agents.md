@@ -1,7 +1,7 @@
 ## What This App Does
 
 -   Dynamic TCP routing oracle on `:19000`. Uses TLS SNI to choose a backend, spins up `cloudflared access tcp` on demand, and pipes raw TCP bytes end-to-end.
- -   Tunnels are keyed by a derived backend hostname: prefix `cft-` to the incoming SNI and replace its first `.` with `-` (e.g., `db-123.ratio1.link` → `cft-db-123.ratio1.link`). No static map or external lookup is used.
+-   Tunnels are keyed by a derived backend hostname: prefix `cft-` to the incoming SNI and replace its first `.` with `-` (e.g., `db-123.ratio1.link` → `cft-db-123.ratio1.link`). No static map or external lookup is used.
 -   Local ports for cloudflared are **dynamically** reserved from a pool (`portRangeStart`–`portRangeEnd`); no per-node static port in config anymore.
 
 ## Connection Handling
@@ -13,11 +13,13 @@
 
 ## Files / Structure
 
--   `config.go`: constants (listen address, timeouts, port pool) plus hostname derivation/validation helpers.
--   `sni.go`: PROXY/SSLRequest handling, TLS ClientHello parsing for SNI, backend Postgres SSL response consumption.
--   `node_manager.go`: port pool, tunnel lifecycle (start/restart/idle shutdown), refcounting, readiness wait, cloudflared logging.
--   `main.go`: listener and per-connection flow.
--   `README.md`: high-level overview (note: mentions static local ports—outdated relative to dynamic port pool).
+-   `cmd/tcp_tunnel_proxy/main.go`: entrypoint; sets logging, builds the node manager from config defaults, listens on `ListenAddr`, and hands each connection to the connection handler.
+-   `configs/config.go`: default listen address, timeouts, and dynamic port range; stub for env-driven overrides.
+-   `internal/connection_handler/connection_handler.go`: per-connection flow—extract SNI, prepare tunnel, replay prelude bytes, and proxy streams.
+-   `internal/connection_handler/sni.go`: PROXY v1/v2 handling, PostgreSQL SSLRequest negotiation, TLS ClientHello parsing for SNI, and buffer pooling (+ tests in `connection_handler_test.go`, `sni_test.go`).
+-   `internal/cloudflared_manager/cloudflared_manager.go`: cloudflared lifecycle (start, restart on failure, idle teardown), refcounting, readiness wait, and port pool management.
+-   `internal/cloudflared_manager/hostnames.go`: hostname derivation/validation helpers for the `cft-<sni>` rule (+ tests in `hostnames_test.go`, `portpool_test.go`).
+-   `README.md`: high-level overview, quick start, and behavior notes.
 
 ## Operational Notes
 
@@ -32,5 +34,5 @@
 ## TODO / Follow-ups
 
 -   Replace the temporary SNI-failure `OK` response with proper rejection once debugging is done.
--   Update `README.md` to reflect dynamic port pool and current file layout. (Partially done; keep in sync with derivation rules.)
--   Consider exposing configuration (timeouts/derivation rule) via file/env; add observability/metrics if needed.
+-   Expose configuration (timeouts/derivation rule/port range) via env or flags; wire `LoadConfigENV`.
+-   Consider adding observability/metrics if needed.

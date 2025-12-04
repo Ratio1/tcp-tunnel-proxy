@@ -1,4 +1,4 @@
-package main
+package connectionhandler
 
 import (
 	"bytes"
@@ -7,37 +7,19 @@ import (
 	"log"
 	"net"
 	"sync"
+	"tcp-tunnel-proxy/configs"
+	cloudflaredmanager "tcp-tunnel-proxy/internal/cloudflared_manager"
 	"time"
 )
 
-func main() {
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	manager := NewNodeManager(idleTimeout, startupTimeout, portRangeStart, portRangeEnd)
-
-	ln, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		log.Fatalf("failed to listen on %s: %v", listenAddr, err)
-	}
-	log.Printf("Routing oracle listening on %s", listenAddr)
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Printf("accept error: %v", err)
-			continue
-		}
-		go handleConnection(conn, manager)
-	}
-}
-
 // handleConnection drives a single client flow: extract SNI, prepare tunnel, and proxy bytes.
-func handleConnection(conn net.Conn, manager *NodeManager) {
+func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager) {
 	defer conn.Close()
 
 	remote := conn.RemoteAddr().String()
 	log.Printf("Incoming connection %s", remote)
 
-	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(configs.ReadHelloTimeout))
 	sni, buffers, sawPGSSLRequest, err := extractSNI(conn)
 	_ = conn.SetReadDeadline(time.Time{})
 	if buffers != nil {
