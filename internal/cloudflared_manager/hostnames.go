@@ -9,10 +9,10 @@ import (
 var hostnameLabelRE = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 // deriveTunnelHostname deterministically maps an incoming SNI to the cloudflared hostname.
-// Rule: prefix with "cft-" and replace the first dot in the SNI with a hyphen.
+// Rule: prefix with "cft-".
 func deriveTunnelHostname(sni string) string {
 	normalized := strings.ToLower(strings.TrimSpace(sni))
-	return "cft-" + strings.Replace(normalized, ".", "-", 1)
+	return "cft-" + normalized
 }
 
 // validateHostname checks basic DNS label constraints for use with cloudflared.

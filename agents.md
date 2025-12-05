@@ -1,7 +1,7 @@
 ## What This App Does
 
 -   Dynamic TCP routing oracle on `:19000`. Uses TLS SNI to choose a backend, spins up `cloudflared access tcp` on demand, and pipes raw TCP bytes end-to-end.
--   Tunnels are keyed by a derived backend hostname: prefix `cft-` to the incoming SNI and replace its first `.` with `-` (e.g., `db-123.ratio1.link` → `cft-db-123.ratio1.link`). No static map or external lookup is used.
+-   Tunnels are keyed by a derived backend hostname: prefix `cft-` to the incoming SNI (e.g., `db-123.ratio1.link` → `cft-db-123.ratio1.link`). No static map or external lookup is used.
 -   Local ports for cloudflared are **dynamically** reserved from a pool (`portRangeStart`–`portRangeEnd`); no per-node static port in config anymore.
 
 ## Connection Handling

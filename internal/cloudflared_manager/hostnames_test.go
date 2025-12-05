@@ -7,7 +7,7 @@ import (
 
 func TestDeriveTunnelHostnameNormalizesAndPrefixes(t *testing.T) {
 	got := deriveTunnelHostname(" Db-123.Ratio1.link ")
-	want := "cft-db-123-ratio1.link"
+	want := "cft-db-123.ratio1.link"
 	if got != want {
 		t.Fatalf("deriveTunnelHostname() = %q, want %q", got, want)
 	}
@@ -39,7 +39,7 @@ func TestDeriveValidatedTunnelHostname(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deriveValidatedTunnelHostname(%q) unexpected error: %v", host, err)
 	}
-	want := "cft-db-123-ratio1.link"
+	want := "cft-db-123.ratio1.link"
 	if got != want {
 		t.Fatalf("deriveValidatedTunnelHostname(%q) = %q, want %q", host, got, want)
 	}

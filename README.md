@@ -5,14 +5,14 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 ## Features
 
 -   Listens on `:19000` (change in `listenAddr`).
--   SNI-based routing with deterministic hostname derivation (`cft-` + SNI with the first dot replaced by `-`); rejects/short-circuits if SNI missing (currently returns `OK` placeholder on failure).
+-   SNI-based routing with deterministic hostname derivation (`cft-`); rejects/short-circuits if SNI missing (currently returns `OK` placeholder on failure).
 -   On-demand `cloudflared access tcp` per backend with refcounts and idle shutdown.
 -   Full-duplex raw TCP piping with initial bytes replayed.
 
 ## Quick Start
 
 1. Ensure `cloudflared` is installed and on PATH.
-2. Ensure your Cloudflare Access/DNS hostnames follow the rule `cft-<SNI with the first "." replaced by "-">` (e.g., SNI `db-123.ratio1.link` → tunnel hostname `cft-db-123.ratio1.link`).
+2. Ensure your Cloudflare Access/DNS hostnames follow the rule `cft-<SNI>` (e.g., SNI `db-123.ratio1.link` → tunnel hostname `cft-db-123.ratio1.link`).
 3. Build/run:
     ```sh
     go run .
@@ -36,7 +36,7 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 ## Configuration
 
 -   `listenAddr`, `idleTimeout`, `startupTimeout`, `readHelloTimeout` constants in `main.go`.
--   Hostname derivation rule lives in `deriveTunnelHostname` (prefix `cft-`, replace the first dot with `-`); adjust if you need a different mapping pattern.
+-   Hostname derivation rule lives in `deriveTunnelHostname` (prefix `cft-`); adjust if you need a different mapping pattern.
 
 ### Environment Variables
 
