@@ -8,7 +8,7 @@
 
 -   Supports PROXY protocol v1/v2: headers are consumed and replayed to backend.
 -   PostgreSQL support: detects SSLRequest prelude, replies `S` so client sends TLS ClientHello, then consumes backend’s SSL response before piping. SNI is parsed from the ClientHello.
--   If SNI extraction fails, current temporary behavior writes `OK\n` and closes (meant for debugging; flip to hard reject for production).
+-   If SNI extraction fails, the connection is closed after sending a TLS fatal alert (unrecognized_name).
 -   Full-duplex forwarding via `io.Copy`; initial bytes (PROXY/SSLRequest/TLS record plus any buffered data) are replayed to backend before streaming.
 
 ## Files / Structure
@@ -33,6 +33,5 @@
 
 ## TODO / Follow-ups
 
--   Replace the temporary SNI-failure `OK` response with proper rejection once debugging is done.
 -   Expose configuration (timeouts/derivation rule/port range) via env or flags; wire `LoadConfigENV`.
 -   Consider adding observability/metrics if needed.

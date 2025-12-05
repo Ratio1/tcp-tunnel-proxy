@@ -5,7 +5,7 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 ## Features
 
 -   Listens on `:19000` (change in `listenAddr`).
--   SNI-based routing with deterministic hostname derivation (`cft-`); rejects/short-circuits if SNI missing (currently returns `OK` placeholder on failure).
+-   SNI-based routing with deterministic hostname derivation (`cft-`); rejects/short-circuits if SNI is missing (sends a TLS alert).
 -   On-demand `cloudflared access tcp` per backend with refcounts and idle shutdown.
 -   Full-duplex raw TCP piping with initial bytes replayed.
 
@@ -19,7 +19,7 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
     # or
     go build -o tcp-tunnel-proxy && ./tcp-tunnel-proxy cmd/tcp_tunnel_proxy/main.go
     ```
-4. Clients connect over TLS with SNI set (e.g., `psql "postgres://service.customer1.example.com:19000/db?sslmode=require"`). Non-TLS/no-SNI currently get an `OK` and close (temporary behavior).
+4. Clients connect over TLS with SNI set (e.g., `psql "postgres://service.customer1.example.com:19000/db?sslmode=require"`). Non-TLS/no-SNI connections are rejected with a TLS alert.
 
 ## Downloads
 
@@ -88,5 +88,4 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 
 ## Caveats / TODO
 
--   Temporary SNI failure handling sends `OK\n` instead of rejecting; switch to reject for production.
 -   No persistence/log rotation; relies on stdout logging.
