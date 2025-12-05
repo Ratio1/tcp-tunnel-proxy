@@ -26,6 +26,43 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
 -   [Linux amd64](https://github.com/Ratio1/tcp-tunnel-proxy/releases/latest/download/tcp-tunnel-proxy-linux-amd64.tar.gz)
 -   [Linux arm64](https://github.com/Ratio1/tcp-tunnel-proxy/releases/latest/download/tcp-tunnel-proxy-linux-arm64.tar.gz)
 
+## Run as a systemd Service (Linux)
+
+1. Download and install the release binary (pick the right arch):
+    ```sh
+    curl -L https://github.com/Ratio1/tcp-tunnel-proxy/releases/latest/download/tcp-tunnel-proxy-linux-amd64.tar.gz -o /tmp/tcp-tunnel-proxy.tar.gz
+    sudo tar -xzf /tmp/tcp-tunnel-proxy.tar.gz -C /usr/local/bin
+    sudo mv /usr/local/bin/tcp-tunnel-proxy-linux-amd64 /usr/local/bin/tcp-tunnel-proxy
+    sudo chmod +x /usr/local/bin/tcp-tunnel-proxy
+    ```
+    Replace `amd64` with `arm64` if needed.
+2. Create `/etc/systemd/system/tcp-tunnel-proxy.service` and place environment overrides directly in the unit (matches the variables in the section below):
+    ```ini
+    [Unit]
+    Description=TCP Tunnel Proxy
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    ExecStart=/usr/local/bin/tcp-tunnel-proxy
+    Environment=LISTEN_ADDR=:19000
+    Environment=PORT_RANGE_START=45000
+    Environment=PORT_RANGE_END=46000
+    Environment=LOG_FORMAT=plain
+    Restart=on-failure
+    RestartSec=2s
+    LimitNOFILE=65536
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+3. Reload systemd and start:
+    ```sh
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now tcp-tunnel-proxy.service
+    sudo systemctl status tcp-tunnel-proxy.service
+    ```
+
 ## Behavior Notes
 
 -   PROXY protocol: If a load balancer prepends PROXY v1/v2, it is consumed and forwarded to the backend.
