@@ -43,7 +43,7 @@ jobs:
       - name: Build linux ${{ matrix.goarch }} binary
         run: |
           mkdir -p dist
-          GOOS=linux GOARCH=${{ matrix.goarch }} go build -o dist/tcp-tunnel-proxy-linux-${{ matrix.goarch }} ./...
+          GOOS=linux GOARCH=${{ matrix.goarch }} go build -o dist/tcp-tunnel-proxy-linux-${{ matrix.goarch }} cmd/tcp_tunnel_proxy/main.go
 
       - name: Create archive
         run: |

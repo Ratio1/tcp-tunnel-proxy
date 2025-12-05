@@ -17,7 +17,7 @@ Dynamic TCP routing oracle that accepts public TCP connections, extracts TLS SNI
     ```sh
     go run .
     # or
-    go build ./... -o tcp-tunnel-proxy && ./tcp-tunnel-proxy
+    go build -o tcp-tunnel-proxy && ./tcp-tunnel-proxy cmd/tcp_tunnel_proxy/main.go
     ```
 4. Clients connect over TLS with SNI set (e.g., `psql "postgres://service.customer1.example.com:19000/db?sslmode=require"`). Non-TLS/no-SNI currently get an `OK` and close (temporary behavior).
 
