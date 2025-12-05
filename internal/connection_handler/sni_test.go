@@ -1,4 +1,4 @@
-package main
+package connectionhandler
 
 import (
 	"bufio"
@@ -71,7 +71,7 @@ func TestMaybeHandlePostgresSSLRequest(t *testing.T) {
 	conn := newMockConn(req)
 	reader := bufio.NewReader(bytes.NewReader(req))
 	var consumed []byte
-	saw, err := maybeHandlePostgresSSLRequest(reader, &consumed, conn)
+	saw, err := maybeHandlePostgresSSLRequest(reader, &consumed, conn, time.Second)
 	if err != nil {
 		t.Fatalf("maybeHandlePostgresSSLRequest error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestMaybeHandlePostgresSSLRequestIgnoresNonSSLRequest(t *testing.T) {
 	conn := newMockConn(data)
 	reader := bufio.NewReader(bytes.NewReader(data))
 	var consumed []byte
-	saw, err := maybeHandlePostgresSSLRequest(reader, &consumed, conn)
+	saw, err := maybeHandlePostgresSSLRequest(reader, &consumed, conn, time.Second)
 	if err != nil {
 		t.Fatalf("maybeHandlePostgresSSLRequest error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestMaybeHandlePostgresSSLRequestIgnoresNonSSLRequest(t *testing.T) {
 
 func TestConsumeBackendPostgresSSLResponse(t *testing.T) {
 	acceptConn := newMockConn([]byte("S"))
-	prefix, err := consumeBackendPostgresSSLResponse(acceptConn)
+	prefix, err := consumeBackendPostgresSSLResponse(acceptConn, time.Second)
 	if err != nil && err != io.EOF {
 		t.Fatalf("consumeBackendPostgresSSLResponse accept error: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestConsumeBackendPostgresSSLResponse(t *testing.T) {
 	}
 
 	rejectConn := newMockConn([]byte("N"))
-	prefix, err = consumeBackendPostgresSSLResponse(rejectConn)
+	prefix, err = consumeBackendPostgresSSLResponse(rejectConn, time.Second)
 	if err != nil && err != io.EOF {
 		t.Fatalf("consumeBackendPostgresSSLResponse reject error: %v", err)
 	}
