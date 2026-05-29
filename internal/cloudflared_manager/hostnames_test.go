@@ -5,11 +5,14 @@ import (
 	"testing"
 )
 
-func TestDeriveTunnelHostnameNormalizesAndPrefixes(t *testing.T) {
-	got := deriveTunnelHostname(" Db-123.Ratio1.link ")
-	want := "cft-db-123.ratio1.link"
+func TestNormalizeValidatedHostname(t *testing.T) {
+	got, err := normalizeValidatedHostname(" Origin-123.Ratio1.Link ")
+	if err != nil {
+		t.Fatalf("normalizeValidatedHostname returned error: %v", err)
+	}
+	want := "origin-123.ratio1.link"
 	if got != want {
-		t.Fatalf("deriveTunnelHostname() = %q, want %q", got, want)
+		t.Fatalf("normalizeValidatedHostname() = %q, want %q", got, want)
 	}
 }
 
@@ -33,20 +36,8 @@ func TestValidateHostnameRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestDeriveValidatedTunnelHostname(t *testing.T) {
-	host := "db-123.ratio1.link"
-	got, err := deriveValidatedTunnelHostname(host)
-	if err != nil {
-		t.Fatalf("deriveValidatedTunnelHostname(%q) unexpected error: %v", host, err)
-	}
-	want := "cft-db-123.ratio1.link"
-	if got != want {
-		t.Fatalf("deriveValidatedTunnelHostname(%q) = %q, want %q", host, got, want)
-	}
-}
-
-func TestDeriveValidatedTunnelHostnameRejectsInvalidInput(t *testing.T) {
-	if _, err := deriveValidatedTunnelHostname("bad host.name"); err == nil {
-		t.Fatalf("deriveValidatedTunnelHostname accepted invalid host with spaces")
+func TestNormalizeValidatedHostnameRejectsInvalidInput(t *testing.T) {
+	if _, err := normalizeValidatedHostname("bad host.name"); err == nil {
+		t.Fatalf("normalizeValidatedHostname accepted invalid host with spaces")
 	}
 }

@@ -1,37 +1,37 @@
 ## What This App Does
 
--   Dynamic TCP routing oracle on `:19000`. Uses TLS SNI to choose a backend, spins up `cloudflared access tcp` on demand, and pipes raw TCP bytes end-to-end.
--   Tunnels are keyed by a derived backend hostname: prefix `cft-` to the incoming SNI (e.g., `db-123.ratio1.link` → `cft-db-123.ratio1.link`). No static map or external lookup is used.
--   Local ports for cloudflared are **dynamically** reserved from a pool (`portRangeStart`–`portRangeEnd`); no per-node static port in config anymore.
+-   Port-based TCP proxy for Cloudflare Access tunnels.
+-   The process listens on every configured public port and asks tunnel manager `get_tcp_route(public_port)` for the origin hostname.
+-   Successful route lookups are cached in memory for the process lifetime.
+-   Local ports for cloudflared are dynamically reserved from `LOCAL_PORT_RANGE_START`-`LOCAL_PORT_RANGE_END`.
 
 ## Connection Handling
 
--   Supports PROXY protocol v1/v2: headers are consumed and replayed to backend.
--   PostgreSQL support: detects SSLRequest prelude, replies `S` so client sends TLS ClientHello, then consumes backend’s SSL response before piping. SNI is parsed from the ClientHello.
--   If SNI extraction fails, the connection is closed after sending a TLS fatal alert (unrecognized_name).
--   Full-duplex forwarding via `io.Copy`; initial bytes (PROXY/SSLRequest/TLS record plus any buffered data) are replayed to backend before streaming.
+-   No protocol parsing is used for routing. Connections are forwarded as raw TCP.
+-   If route lookup fails for the accepted public port, the connection is closed.
+-   Full-duplex forwarding uses `io.Copy` in both directions after the local `cloudflared access tcp` process is ready.
 
 ## Files / Structure
 
--   `cmd/tcp_tunnel_proxy/main.go`: entrypoint; sets logging, builds the node manager from config defaults, listens on `ListenAddr`, and hands each connection to the connection handler.
--   `configs/config.go`: default listen address, timeouts, and dynamic port range; stub for env-driven overrides.
--   `internal/connection_handler/connection_handler.go`: per-connection flow—extract SNI, prepare tunnel, replay prelude bytes, and proxy streams.
--   `internal/connection_handler/sni.go`: PROXY v1/v2 handling, PostgreSQL SSLRequest negotiation, TLS ClientHello parsing for SNI, and buffer pooling (+ tests in `connection_handler_test.go`, `sni_test.go`).
--   `internal/cloudflared_manager/cloudflared_manager.go`: cloudflared lifecycle (start, restart on failure, idle teardown), refcounting, readiness wait, and port pool management.
--   `internal/cloudflared_manager/hostnames.go`: hostname derivation/validation helpers for the `cft-<sni>` rule (+ tests in `hostnames_test.go`, `portpool_test.go`).
--   `README.md`: high-level overview, quick start, and behavior notes.
+-   `cmd/tcp_tunnel_proxy/main.go`: entrypoint; sets logging, opens one listener per public port, and hands each connection to the connection handler.
+-   `configs/config.go`: environment-driven listen range, tunnel manager URL, timeouts, logging, and local cloudflared port range.
+-   `internal/route_provider/route_provider.go`: swappable helper for resolving public port to origin hostname through tunnel manager.
+-   `internal/connection_handler/connection_handler.go`: per-connection route lookup, tunnel preparation, and raw TCP proxying.
+-   `internal/cloudflared_manager/cloudflared_manager.go`: cloudflared lifecycle, hostname-keyed reuse, restart on failure, idle teardown, refcounting, readiness wait, and port pool management.
+-   `internal/cloudflared_manager/hostnames.go`: origin hostname validation helpers.
+-   `README.md`: high-level overview, quick start, configuration, and behavior notes.
 
 ## Operational Notes
 
--   Everything should be optimized to handle many connections, be fast, and have very small overhead time.
--   Requires `cloudflared` on PATH. Startup wait is `startupTimeout`; idle teardown uses `idleTimeout`.
+-   Requires `cloudflared` on PATH. Startup wait is `STARTUP_TIMEOUT`; idle teardown uses `IDLE_TIMEOUT`.
 -   Restart logic: if cloudflared exits while refcount > 0, manager attempts restart.
+-   Route deletion or port reuse can require proxy restart until route invalidation exists.
 
 ## Development Practices
 
--   Add or update automated tests for every new function or feature; keep coverage for SNI parsing, port management, and tunnel lifecycle helpers in sync with changes.
+-   Add or update automated tests for every new function or feature; keep coverage for route lookup, raw relay behavior, port management, and tunnel lifecycle helpers in sync with changes.
 
 ## TODO / Follow-ups
 
--   Expose configuration (timeouts/derivation rule/port range) via env or flags; wire `LoadConfigENV`.
+-   Add route invalidation or disk-backed reads if tunnel manager lookup becomes insufficient.
 -   Consider adding observability/metrics if needed.

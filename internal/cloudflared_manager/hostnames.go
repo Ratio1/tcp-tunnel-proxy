@@ -8,11 +8,18 @@ import (
 
 var hostnameLabelRE = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
-// deriveTunnelHostname deterministically maps an incoming SNI to the cloudflared hostname.
-// Rule: prefix with "cft-".
-func deriveTunnelHostname(sni string) string {
-	normalized := strings.ToLower(strings.TrimSpace(sni))
-	return "cft-" + normalized
+// normalizeValidatedHostname prepares an origin hostname for cloudflared.
+func normalizeValidatedHostname(host string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(host))
+	if err := validateHostname(normalized); err != nil {
+		return "", fmt.Errorf("invalid hostname %q: %w", host, err)
+	}
+	return normalized, nil
+}
+
+// NormalizeHostname prepares an origin hostname for packages outside the manager.
+func NormalizeHostname(host string) (string, error) {
+	return normalizeValidatedHostname(host)
 }
 
 // validateHostname checks basic DNS label constraints for use with cloudflared.
@@ -49,17 +56,4 @@ func validateHostname(host string) error {
 		}
 	}
 	return nil
-}
-
-// deriveValidatedTunnelHostname normalizes, validates, and derives the cloudflared hostname from SNI.
-func deriveValidatedTunnelHostname(sni string) (string, error) {
-	normalized := strings.ToLower(strings.TrimSpace(sni))
-	if err := validateHostname(normalized); err != nil {
-		return "", fmt.Errorf("invalid SNI %q: %w", sni, err)
-	}
-	derived := deriveTunnelHostname(normalized)
-	if err := validateHostname(derived); err != nil {
-		return "", fmt.Errorf("invalid derived hostname %q: %w", derived, err)
-	}
-	return derived, nil
 }
