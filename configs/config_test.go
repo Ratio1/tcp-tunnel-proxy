@@ -16,6 +16,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.ListenHost != defaultListenHost {
 		t.Fatalf("ListenHost: got %q, want %q", cfg.ListenHost, defaultListenHost)
 	}
+	if cfg.HealthPort != defaultHealthPort {
+		t.Fatalf("HealthPort: got %d, want %d", cfg.HealthPort, defaultHealthPort)
+	}
 	if cfg.PublicPortRangeStart != defaultPublicPortRangeStart || cfg.PublicPortRangeEnd != defaultPublicPortRangeEnd {
 		t.Fatalf("PublicPortRange: got %d-%d, want %d-%d", cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd, defaultPublicPortRangeStart, defaultPublicPortRangeEnd)
 	}
@@ -42,6 +45,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 func TestLoadConfigOverrides(t *testing.T) {
 	unsetAllEnv(t)
 	t.Setenv(envListenHost, "127.0.0.1")
+	t.Setenv(envHealthPort, "29998")
 	t.Setenv(envPublicPortRangeStart, "35000")
 	t.Setenv(envPublicPortRangeEnd, "35010")
 	t.Setenv(envTunnelManagerBaseURL, "https://tunnel-manager.example.com")
@@ -61,6 +65,9 @@ func TestLoadConfigOverrides(t *testing.T) {
 
 	if cfg.ListenHost != "127.0.0.1" {
 		t.Fatalf("ListenHost override failed, got %q", cfg.ListenHost)
+	}
+	if cfg.HealthPort != 29998 {
+		t.Fatalf("HealthPort override failed, got %d", cfg.HealthPort)
 	}
 	if cfg.PublicPortRangeStart != 35000 || cfg.PublicPortRangeEnd != 35010 {
 		t.Fatalf("PublicPortRange override failed, got %d-%d", cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd)
@@ -94,6 +101,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 func TestLoadConfigInvalidValues(t *testing.T) {
 	unsetAllEnv(t)
 	t.Setenv(envListenHost, "bad host")
+	t.Setenv(envHealthPort, "65536")
 	t.Setenv(envPublicPortRangeStart, "40000")
 	t.Setenv(envPublicPortRangeEnd, "30000")
 	t.Setenv(envTunnelManagerBaseURL, "")
@@ -113,6 +121,9 @@ func TestLoadConfigInvalidValues(t *testing.T) {
 
 	if cfg.ListenHost != defaultListenHost {
 		t.Fatalf("ListenHost should reset to default on invalid, got %q", cfg.ListenHost)
+	}
+	if cfg.HealthPort != defaultHealthPort {
+		t.Fatalf("HealthPort should reset to default on invalid, got %d", cfg.HealthPort)
 	}
 	if cfg.PublicPortRangeStart != defaultPublicPortRangeStart || cfg.PublicPortRangeEnd != defaultPublicPortRangeEnd {
 		t.Fatalf("public port range should reset to defaults on invalid order, got %d-%d", cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd)
@@ -140,6 +151,19 @@ func TestLoadConfigInvalidValues(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsHealthPortOverlap(t *testing.T) {
+	unsetAllEnv(t)
+	t.Setenv(envHealthPort, "30000")
+
+	cfg, err := LoadConfigFromEnv()
+	if err == nil {
+		t.Fatalf("expected error for health port overlapping public port range")
+	}
+	if cfg.HealthPort != defaultHealthPort {
+		t.Fatalf("health port should reset to default after overlap, got %d", cfg.HealthPort)
+	}
+}
+
 func TestLoadConfigRejectsPortsAboveTCPMaximum(t *testing.T) {
 	unsetAllEnv(t)
 	t.Setenv(envPublicPortRangeStart, "65536")
@@ -162,6 +186,7 @@ func TestLoadConfigRejectsPortsAboveTCPMaximum(t *testing.T) {
 func unsetAllEnv(t *testing.T) {
 	t.Helper()
 	os.Unsetenv(envListenHost)
+	os.Unsetenv(envHealthPort)
 	os.Unsetenv(envPublicPortRangeStart)
 	os.Unsetenv(envPublicPortRangeEnd)
 	os.Unsetenv(envTunnelManagerBaseURL)

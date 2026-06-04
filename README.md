@@ -5,6 +5,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 ## Features
 
 -   Listens on every public port in `PUBLIC_PORT_RANGE_START`-`PUBLIC_PORT_RANGE_END` (`30000`-`30499` by default).
+-   Listens on `HEALTH_PORT` (`29999` by default) and returns `success` without route lookup or tunnel startup.
 -   Resolves routes through tunnel manager `get_tcp_route(public_port)`.
 -   Caches successful route lookups in memory for the process lifetime.
 -   Starts one local `cloudflared access tcp --hostname <origin>` process per origin hostname.
@@ -47,6 +48,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
     [Service]
     ExecStart=/usr/local/bin/tcp-tunnel-proxy
     Environment=LISTEN_HOST=
+    Environment=HEALTH_PORT=29999
     Environment=PUBLIC_PORT_RANGE_START=30000
     Environment=PUBLIC_PORT_RANGE_END=30499
     Environment=TUNNEL_MANAGER_BASE_URL=https://1f8b266e9dbf.ratio1.link
@@ -70,6 +72,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 ## Behavior Notes
 
 -   Route source of truth: tunnel manager owns the ChainStore port registry. This proxy only calls `get_tcp_route(public_port)`.
+-   Health checks: connections to `HEALTH_PORT` receive `success` and close; the health port must not overlap the public port range.
 -   Cache behavior: successful port lookups are cached indefinitely for this process. Route deletion or port reuse can require a proxy restart until invalidation exists.
 -   Cloudflared lifecycle: starts on first connection per origin hostname, waits for local port readiness, increments refcounts, and tears down idle tunnels after `IDLE_TIMEOUT`.
 -   Crashes: if cloudflared exits while connections are active, the manager attempts restart.
@@ -77,6 +80,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 ## Environment Variables
 
 -   `LISTEN_HOST`: host/interface to bind (empty means all interfaces).
+-   `HEALTH_PORT`: TCP health-check port that returns `success` without route lookup or tunnel startup (default `29999`).
 -   `PUBLIC_PORT_RANGE_START` / `PUBLIC_PORT_RANGE_END`: public ports to listen on.
 -   `TUNNEL_MANAGER_BASE_URL`: tunnel manager API base URL.
 -   `ROUTE_LOOKUP_TIMEOUT`: timeout for `get_tcp_route` requests (default `5s`).

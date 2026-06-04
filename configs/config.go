@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	ListenHost           string
+	HealthPort           int
 	PublicPortRangeStart int
 	PublicPortRangeEnd   int
 	TunnelManagerBaseURL string
@@ -27,6 +28,7 @@ type Config struct {
 
 const (
 	defaultListenHost           = ""
+	defaultHealthPort           = 29999
 	defaultPublicPortRangeStart = 30000
 	defaultPublicPortRangeEnd   = 30499
 	defaultTunnelManagerBaseURL = "https://1f8b266e9dbf.ratio1.link"
@@ -43,6 +45,7 @@ const (
 
 const (
 	envListenHost           = "LISTEN_HOST"
+	envHealthPort           = "HEALTH_PORT"
 	envPublicPortRangeStart = "PUBLIC_PORT_RANGE_START"
 	envPublicPortRangeEnd   = "PUBLIC_PORT_RANGE_END"
 	envTunnelManagerBaseURL = "TUNNEL_MANAGER_BASE_URL"
@@ -61,6 +64,7 @@ const (
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
 		ListenHost:           defaultListenHost,
+		HealthPort:           defaultHealthPort,
 		PublicPortRangeStart: defaultPublicPortRangeStart,
 		PublicPortRangeEnd:   defaultPublicPortRangeEnd,
 		TunnelManagerBaseURL: defaultTunnelManagerBaseURL,
@@ -78,6 +82,15 @@ func LoadConfigFromEnv() (Config, error) {
 
 	if v := strings.TrimSpace(os.Getenv(envListenHost)); v != "" {
 		cfg.ListenHost = v
+	}
+
+	if v := strings.TrimSpace(os.Getenv(envHealthPort)); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			errs = append(errs, fmt.Errorf("invalid %s: %q (%v)", envHealthPort, v, err))
+		} else {
+			cfg.HealthPort = n
+		}
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envPublicPortRangeStart)); v != "" {
@@ -198,6 +211,14 @@ func validateConfig(cfg *Config) error {
 		errs = append(errs, fmt.Errorf("public port range end must be between start and %d, got %d-%d", maxTCPPort, cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd))
 		cfg.PublicPortRangeStart = defaultPublicPortRangeStart
 		cfg.PublicPortRangeEnd = defaultPublicPortRangeEnd
+	}
+	if cfg.HealthPort <= 0 || cfg.HealthPort > maxTCPPort {
+		errs = append(errs, fmt.Errorf("health port must be between 1 and %d, got %d", maxTCPPort, cfg.HealthPort))
+		cfg.HealthPort = defaultHealthPort
+	}
+	if cfg.HealthPort >= cfg.PublicPortRangeStart && cfg.HealthPort <= cfg.PublicPortRangeEnd {
+		errs = append(errs, fmt.Errorf("health port %d overlaps public port range %d-%d", cfg.HealthPort, cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd))
+		cfg.HealthPort = defaultHealthPort
 	}
 	if strings.TrimSpace(cfg.TunnelManagerBaseURL) == "" {
 		errs = append(errs, fmt.Errorf("tunnel manager base URL must not be empty"))
