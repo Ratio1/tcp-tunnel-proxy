@@ -79,20 +79,27 @@ type nodeState struct {
 	restarts  int
 }
 
+func completeReadyLocked(st *nodeState, ready chan struct{}) {
+	if ready != nil && st.ready == ready {
+		close(ready)
+		st.ready = nil
+	}
+}
+
 // Config holds tunable settings for the node manager.
 type Config struct {
-	IdleTimeout    time.Duration
-	StartupTimeout time.Duration
-	PortRangeStart int
-	PortRangeEnd   int
-	RestartBackoff time.Duration
-	MaxRestarts    int
+	IdleTimeout         time.Duration
+	StartupTimeout      time.Duration
+	LocalPortRangeStart int
+	LocalPortRangeEnd   int
+	RestartBackoff      time.Duration
+	MaxRestarts         int
 }
 
 // NewNodeManager constructs a manager using the provided configuration, then applies overrides.
 func NewNodeManager(cfg Config) (*NodeManager, error) {
-	if cfg.PortRangeStart <= 0 || cfg.PortRangeEnd < cfg.PortRangeStart {
-		return nil, fmt.Errorf("invalid port pool range %d-%d", cfg.PortRangeStart, cfg.PortRangeEnd)
+	if cfg.LocalPortRangeStart <= 0 || cfg.LocalPortRangeEnd < cfg.LocalPortRangeStart {
+		return nil, fmt.Errorf("invalid local port pool range %d-%d", cfg.LocalPortRangeStart, cfg.LocalPortRangeEnd)
 	}
 	if cfg.IdleTimeout <= 0 || cfg.StartupTimeout <= 0 {
 		return nil, fmt.Errorf("timeouts must be positive")
@@ -108,16 +115,16 @@ func NewNodeManager(cfg Config) (*NodeManager, error) {
 		nodes:          make(map[string]*nodeState),
 		idleTimeout:    cfg.IdleTimeout,
 		startupTimeout: cfg.StartupTimeout,
-		ports:          newPortPool(cfg.PortRangeStart, cfg.PortRangeEnd),
+		ports:          newPortPool(cfg.LocalPortRangeStart, cfg.LocalPortRangeEnd),
 		restartBackoff: cfg.RestartBackoff,
 		maxRestarts:    cfg.MaxRestarts,
 		logger:         logging.New("node_manager"),
 	}, nil
 }
 
-// GetOrStart ensures a tunnel for the given SNI is running and returns its local port.
-func (m *NodeManager) GetOrStart(sni string) (int, error) {
-	hostname, err := deriveValidatedTunnelHostname(sni)
+// GetOrStart ensures a tunnel for the given origin hostname is running and returns its local port.
+func (m *NodeManager) GetOrStart(originHostname string) (int, error) {
+	hostname, err := normalizeValidatedHostname(originHostname)
 	if err != nil {
 		return 0, err
 	}
@@ -159,19 +166,19 @@ func (m *NodeManager) GetOrStart(sni string) (int, error) {
 	m.mu.Unlock()
 
 	if err != nil {
-		m.Release(sni)
+		m.Release(hostname)
 		return 0, err
 	}
 	if port == 0 {
-		m.Release(sni)
+		m.Release(hostname)
 		return 0, fmt.Errorf("no port assigned for %s", hostname)
 	}
 	return port, nil
 }
 
 // Release decrements the refcount for a node and schedules tunnel teardown if idle.
-func (m *NodeManager) Release(sni string) {
-	hostname, err := deriveValidatedTunnelHostname(sni)
+func (m *NodeManager) Release(originHostname string) {
+	hostname, err := normalizeValidatedHostname(originHostname)
 	if err != nil {
 		return
 	}
@@ -208,10 +215,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 			m.logger.Errorf("port reservation failed for %s: %v", hostname, err)
 			m.mu.Lock()
 			st.startErr = err
-			if st.ready == ready {
-				close(ready)
-				st.ready = nil
-			}
+			completeReadyLocked(st, ready)
 			m.mu.Unlock()
 			return
 		}
@@ -235,10 +239,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 		st.cmd = nil
 		st.cancel = nil
 		st.port = 0
-		if st.ready == ready {
-			close(ready)
-			st.ready = nil
-		}
+		completeReadyLocked(st, ready)
 		m.mu.Unlock()
 		m.ports.release(port)
 		cancel()
@@ -265,10 +266,7 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 		st.cancel = nil
 		st.startErr = err
 		st.port = 0
-		if st.ready == ready {
-			close(ready)
-			st.ready = nil
-		}
+		completeReadyLocked(st, ready)
 		m.mu.Unlock()
 		m.ports.release(port)
 		return
@@ -277,8 +275,8 @@ func (m *NodeManager) launchTunnel(st *nodeState, ready chan struct{}) {
 	m.mu.Lock()
 	st.startErr = nil
 	st.restarts = 0
+	completeReadyLocked(st, ready)
 	m.mu.Unlock()
-	close(ready)
 
 	go func() {
 		err := cmd.Wait()
@@ -309,6 +307,13 @@ func (m *NodeManager) handleProcessExit(st *nodeState, err error) {
 			ready := st.ready
 			m.mu.Unlock()
 			time.AfterFunc(backoff, func() {
+				m.mu.Lock()
+				if m.closed || st.refCount == 0 || st.cmd != nil || st.ready != ready {
+					completeReadyLocked(st, ready)
+					m.mu.Unlock()
+					return
+				}
+				m.mu.Unlock()
 				m.launchTunnel(st, ready)
 			})
 		} else {
@@ -335,10 +340,10 @@ func (m *NodeManager) stopNode(hostname string, force bool) {
 	port := st.port
 	st.cmd = nil
 	st.cancel = nil
-	st.ready = nil
 	st.startErr = fmt.Errorf("tunnel stopped")
 	st.idleTimer = nil
 	st.port = 0
+	completeReadyLocked(st, st.ready)
 	m.mu.Unlock()
 
 	m.logger.Infof("Stopping cloudflared for %s (idle=%v)", hostname, force)

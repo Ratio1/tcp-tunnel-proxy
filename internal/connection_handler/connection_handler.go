@@ -1,89 +1,53 @@
 package connectionhandler
 
 import (
-	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"sync"
-	cloudflaredmanager "tcp-tunnel-proxy/internal/cloudflared_manager"
+
 	"tcp-tunnel-proxy/internal/logging"
-	"time"
 )
 
-// handleConnection drives a single client flow: extract SNI, prepare tunnel, and proxy bytes.
-func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager, readHelloTimeout time.Duration, logger *logging.Logger) {
+type RouteProvider interface {
+	GetHostname(ctx context.Context, publicPort int) (string, error)
+}
+
+type TunnelManager interface {
+	GetOrStart(hostname string) (int, error)
+	Release(hostname string)
+}
+
+// HandleConnection resolves the public port to an origin hostname, prepares cloudflared, and proxies raw TCP bytes.
+func HandleConnection(ctx context.Context, conn net.Conn, publicPort int, routes RouteProvider, manager TunnelManager, logger *logging.Logger) {
 	defer conn.Close()
 
 	remote := conn.RemoteAddr().String()
-	logger.Infof("Incoming connection %s", remote)
+	logger.Infof("Incoming connection %s on public port %d", remote, publicPort)
 
-	_ = conn.SetReadDeadline(time.Now().Add(readHelloTimeout))
-	sni, buffers, sawPGSSLRequest, err := extractSNI(conn, readHelloTimeout)
-	if buffers != nil {
-		defer func() {
-			putInitialBuffers(buffers)
-		}()
-	}
+	hostname, err := routes.GetHostname(ctx, publicPort)
 	if err != nil {
-		_ = conn.SetReadDeadline(time.Time{})
-		logger.Errorf("SNI extraction failed for %s: %v (closing connection)", remote, err)
-		if tlsErr := sendTLSAlert(conn, alertUnrecognizedName); tlsErr != nil {
-			logger.Errorf("failed to send TLS alert to %s: %v", remote, tlsErr)
-		}
+		logger.Errorf("route lookup failed for public port %d from %s: %v", publicPort, remote, err)
 		return
 	}
-	_ = conn.SetReadDeadline(time.Time{})
-	_ = conn.SetReadDeadline(time.Time{})
 
-	logger.Infof("Resolved %s as SNI=%s", remote, sni)
-
-	localPort, err := manager.GetOrStart(sni)
+	localPort, err := manager.GetOrStart(hostname)
 	if err != nil {
-		logger.Errorf("tunnel prep failed for %s: %v", sni, err)
+		logger.Errorf("tunnel prep failed for %s: %v", hostname, err)
 		return
 	}
-	defer manager.Release(sni)
+	defer manager.Release(hostname)
 
 	backendAddr := fmt.Sprintf("127.0.0.1:%d", localPort)
 	backendConn, err := net.Dial("tcp", backendAddr)
 	if err != nil {
-		logger.Errorf("failed to dial backend %s for %s: %v", backendAddr, sni, err)
+		logger.Errorf("failed to dial backend %s for %s: %v", backendAddr, hostname, err)
 		return
 	}
 	defer backendConn.Close()
 
-	// Send PROXY + optional PostgreSQL SSLRequest first so we can observe the backend's SSL response,
-	// then stream the TLS ClientHello once the server has answered.
-	if len(buffers.prelude) > 0 {
-		if err := writeAll(backendConn, buffers.prelude); err != nil {
-			logger.Errorf("failed to forward prelude bytes to backend for %s: %v", sni, err)
-			return
-		}
-	}
-
-	var backendReader io.Reader = backendConn
-	if sawPGSSLRequest {
-		prefix, err := consumeBackendPostgresSSLResponse(backendConn, readHelloTimeout)
-		if err != nil {
-			logger.Errorf("backend Postgres SSL response read failed for %s: %v", sni, err)
-		}
-		if len(prefix) > 0 {
-			backendReader = io.MultiReader(bytes.NewReader(prefix), backendConn)
-		}
-	}
-
-	// Now deliver the TLS ClientHello (and any buffered bytes) to the backend before switching to streaming.
-	if len(buffers.tlsInitial) > 0 {
-		if err := writeAll(backendConn, buffers.tlsInitial); err != nil {
-			logger.Errorf("failed to forward TLS initial bytes to backend for %s: %v", sni, err)
-			return
-		}
-	}
-	putInitialBuffers(buffers)
-	buffers = nil
-
-	logger.Infof("Proxying %s -> %s via %s", remote, sni, backendAddr)
+	logger.Infof("Proxying %s -> %s via %s", remote, hostname, backendAddr)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -101,7 +65,7 @@ func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager, re
 
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(conn, backendReader)
+		_, _ = io.Copy(conn, backendConn)
 		if tcp, ok := backendConn.(*net.TCPConn); ok {
 			_ = tcp.CloseRead()
 		}
@@ -111,7 +75,7 @@ func HandleConnection(conn net.Conn, manager *cloudflaredmanager.NodeManager, re
 	}()
 
 	wg.Wait()
-	logger.Infof("Connection closed for %s (%s)", remote, sni)
+	logger.Infof("Connection closed for %s (%s)", remote, hostname)
 }
 
 func writeAll(w io.Writer, data []byte) error {
