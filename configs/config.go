@@ -28,7 +28,7 @@ type Config struct {
 const (
 	defaultListenHost           = ""
 	defaultPublicPortRangeStart = 30000
-	defaultPublicPortRangeEnd   = 39999
+	defaultPublicPortRangeEnd   = 30499
 	defaultTunnelManagerBaseURL = "https://1f8b266e9dbf.ratio1.link"
 	defaultRouteLookupTimeout   = 5 * time.Second
 	defaultIdleTimeout          = 300 * time.Second

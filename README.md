@@ -4,7 +4,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 
 ## Features
 
--   Listens on every public port in `PUBLIC_PORT_RANGE_START`-`PUBLIC_PORT_RANGE_END` (`30000`-`39999` by default).
+-   Listens on every public port in `PUBLIC_PORT_RANGE_START`-`PUBLIC_PORT_RANGE_END` (`30000`-`30499` by default).
 -   Resolves routes through tunnel manager `get_tcp_route(public_port)`.
 -   Caches successful route lookups in memory for the process lifetime.
 -   Starts one local `cloudflared access tcp --hostname <origin>` process per origin hostname.
@@ -48,7 +48,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
     ExecStart=/usr/local/bin/tcp-tunnel-proxy
     Environment=LISTEN_HOST=
     Environment=PUBLIC_PORT_RANGE_START=30000
-    Environment=PUBLIC_PORT_RANGE_END=39999
+    Environment=PUBLIC_PORT_RANGE_END=30499
     Environment=TUNNEL_MANAGER_BASE_URL=https://1f8b266e9dbf.ratio1.link
     Environment=LOCAL_PORT_RANGE_START=20000
     Environment=LOCAL_PORT_RANGE_END=20100
