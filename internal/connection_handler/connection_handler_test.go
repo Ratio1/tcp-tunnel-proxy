@@ -61,11 +61,16 @@ func TestWriteAllPropagatesErrors(t *testing.T) {
 type stubRouteProvider struct {
 	hostname string
 	err      error
+	ctxErr   error
 	calls    int
 }
 
 func (s *stubRouteProvider) GetHostname(ctx context.Context, publicPort int) (string, error) {
 	s.calls++
+	s.ctxErr = ctx.Err()
+	if s.ctxErr != nil {
+		return "", s.ctxErr
+	}
 	return s.hostname, s.err
 }
 
@@ -99,7 +104,7 @@ func TestHandleConnectionClosesWhenRouteMissing(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		HandleConnection(server, 30001, routes, manager, logging.New("test"))
+		HandleConnection(context.Background(), server, 30001, routes, manager, logging.New("test"))
 	}()
 
 	buf := make([]byte, 1)
@@ -114,6 +119,39 @@ func TestHandleConnectionClosesWhenRouteMissing(t *testing.T) {
 	}
 	if len(manager.started) != 0 {
 		t.Fatalf("manager should not be called when route lookup fails")
+	}
+}
+
+func TestHandleConnectionUsesProvidedContextForRouteLookup(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	routes := &stubRouteProvider{hostname: "origin.ratio1.link"}
+	manager := &stubTunnelManager{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		HandleConnection(ctx, server, 30001, routes, manager, logging.New("test"))
+	}()
+
+	buf := make([]byte, 1)
+	_ = client.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := client.Read(buf); err == nil {
+		t.Fatalf("expected connection to close after canceled route lookup")
+	}
+	<-done
+
+	if routes.calls != 1 {
+		t.Fatalf("route calls = %d, want 1", routes.calls)
+	}
+	if !errors.Is(routes.ctxErr, context.Canceled) {
+		t.Fatalf("route context error = %v, want context.Canceled", routes.ctxErr)
+	}
+	if len(manager.started) != 0 {
+		t.Fatalf("manager should not be called when route context is canceled")
 	}
 }
 
@@ -153,7 +191,7 @@ func TestHandleConnectionRelaysRawBytes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		HandleConnection(server, 30001, routes, manager, logging.New("test"))
+		HandleConnection(context.Background(), server, 30001, routes, manager, logging.New("test"))
 	}()
 
 	if _, err := client.Write([]byte("ping")); err != nil {

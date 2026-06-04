@@ -20,13 +20,13 @@ type TunnelManager interface {
 }
 
 // HandleConnection resolves the public port to an origin hostname, prepares cloudflared, and proxies raw TCP bytes.
-func HandleConnection(conn net.Conn, publicPort int, routes RouteProvider, manager TunnelManager, logger *logging.Logger) {
+func HandleConnection(ctx context.Context, conn net.Conn, publicPort int, routes RouteProvider, manager TunnelManager, logger *logging.Logger) {
 	defer conn.Close()
 
 	remote := conn.RemoteAddr().String()
 	logger.Infof("Incoming connection %s on public port %d", remote, publicPort)
 
-	hostname, err := routes.GetHostname(context.Background(), publicPort)
+	hostname, err := routes.GetHostname(ctx, publicPort)
 	if err != nil {
 		logger.Errorf("route lookup failed for public port %d from %s: %v", publicPort, remote, err)
 		return

@@ -133,9 +133,9 @@ func acceptLoop(ctx context.Context, pl portListener, routes connectionhandler.R
 			return
 		}
 		handlerWG.Add(1)
-		go func() {
+		go func(conn net.Conn) {
 			defer handlerWG.Done()
-			connectionhandler.HandleConnection(conn, pl.port, routes, manager, logging.New("connection"))
-		}()
+			connectionhandler.HandleConnection(ctx, conn, pl.port, routes, manager, logging.New("connection"))
+		}(conn)
 	}
 }

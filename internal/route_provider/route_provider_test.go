@@ -16,7 +16,7 @@ func TestHTTPProviderCachesSuccessfulLookups(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
 		if got := r.URL.Query().Get("public_port"); got != "30001" {
-			t.Fatalf("public_port query = %q, want 30001", got)
+			t.Errorf("public_port query = %q, want 30001", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"result": "origin.ratio1.link"})
 	}))
