@@ -51,8 +51,8 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
     Environment=HEALTH_PORT=29999
     Environment=PUBLIC_PORT_RANGE_START=30000
     Environment=PUBLIC_PORT_RANGE_END=30499
-    Environment=LOCAL_TUNNEL_MANAGER_BASE_URL=http://172.17.0.2:31033
-    Environment=TUNNEL_MANAGER_BASE_URL=https://e01ce7651298.ratio1.link
+    Environment=LOCAL_TUNNEL_MANAGER_BASE_URL=http://127.0.0.1:29998
+    Environment=TUNNEL_MANAGER_BASE_URL=https://tunnels-manager.ratio1.ai
     Environment=LOCAL_PORT_RANGE_START=20000
     Environment=LOCAL_PORT_RANGE_END=20100
     Environment=LOG_FORMAT=plain
@@ -84,7 +84,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 -   `LISTEN_HOST`: host/interface to bind (empty means all interfaces).
 -   `HEALTH_PORT`: TCP health-check port that returns `success` without route lookup or tunnel startup (default `29999`).
 -   `PUBLIC_PORT_RANGE_START` / `PUBLIC_PORT_RANGE_END`: public ports to listen on.
--   `LOCAL_TUNNEL_MANAGER_BASE_URL`: local tunnel manager API base URL tried first (default `http://172.17.0.2:31033`).
+-   `LOCAL_TUNNEL_MANAGER_BASE_URL`: local tunnel manager API base URL tried first (default `http://127.0.0.1:29998`).
 -   `TUNNEL_MANAGER_BASE_URL`: public tunnel manager API fallback base URL.
 -   `ROUTE_LOOKUP_TIMEOUT`: timeout for `get_tcp_route` requests (default `5s`).
 -   `IDLE_TIMEOUT`: duration before idle tunnels are torn down (default `300s`).

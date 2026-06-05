@@ -32,8 +32,8 @@ const (
 	defaultHealthPort                = 29999
 	defaultPublicPortRangeStart      = 30000
 	defaultPublicPortRangeEnd        = 30499
-	defaultLocalTunnelManagerBaseURL = "http://172.17.0.2:31033"
-	defaultTunnelManagerBaseURL      = "https://e01ce7651298.ratio1.link"
+	defaultLocalTunnelManagerBaseURL = "http://127.0.0.1:29998"
+	defaultTunnelManagerBaseURL      = "https://tunnels-manager.ratio1.ai"
 	defaultRouteLookupTimeout        = 5 * time.Second
 	defaultIdleTimeout               = 300 * time.Second
 	defaultStartupTimeout            = 15 * time.Second

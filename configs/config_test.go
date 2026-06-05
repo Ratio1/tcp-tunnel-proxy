@@ -48,10 +48,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 func TestLoadConfigOverrides(t *testing.T) {
 	unsetAllEnv(t)
 	t.Setenv(envListenHost, "127.0.0.1")
-	t.Setenv(envHealthPort, "29998")
+	t.Setenv(envHealthPort, "29997")
 	t.Setenv(envPublicPortRangeStart, "35000")
 	t.Setenv(envPublicPortRangeEnd, "35010")
-	t.Setenv(envLocalTunnelManagerBaseURL, "http://127.0.0.1:31033")
+	t.Setenv(envLocalTunnelManagerBaseURL, "http://127.0.0.1:29998")
 	t.Setenv(envTunnelManagerBaseURL, "https://tunnel-manager.example.com")
 	t.Setenv(envRouteLookupTimeout, "4s")
 	t.Setenv(envIdleTimeout, "42s")
@@ -70,13 +70,13 @@ func TestLoadConfigOverrides(t *testing.T) {
 	if cfg.ListenHost != "127.0.0.1" {
 		t.Fatalf("ListenHost override failed, got %q", cfg.ListenHost)
 	}
-	if cfg.HealthPort != 29998 {
+	if cfg.HealthPort != 29997 {
 		t.Fatalf("HealthPort override failed, got %d", cfg.HealthPort)
 	}
 	if cfg.PublicPortRangeStart != 35000 || cfg.PublicPortRangeEnd != 35010 {
 		t.Fatalf("PublicPortRange override failed, got %d-%d", cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd)
 	}
-	if cfg.LocalTunnelManagerBaseURL != "http://127.0.0.1:31033" {
+	if cfg.LocalTunnelManagerBaseURL != "http://127.0.0.1:29998" {
 		t.Fatalf("LocalTunnelManagerBaseURL override failed, got %q", cfg.LocalTunnelManagerBaseURL)
 	}
 	if cfg.TunnelManagerBaseURL != "https://tunnel-manager.example.com" {
