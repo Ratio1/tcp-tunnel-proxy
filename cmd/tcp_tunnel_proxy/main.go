@@ -47,7 +47,12 @@ func main() {
 		log.Fatalf("failed to construct node manager: %v", err)
 	}
 
-	routes, err := routeprovider.NewHTTPProvider(cfg.TunnelManagerBaseURL, cfg.RouteLookupTimeout)
+	routeBaseURLs := make([]string, 0, 2)
+	if cfg.LocalTunnelManagerBaseURL != "" {
+		routeBaseURLs = append(routeBaseURLs, cfg.LocalTunnelManagerBaseURL)
+	}
+	routeBaseURLs = append(routeBaseURLs, cfg.TunnelManagerBaseURL)
+	routes, err := routeprovider.NewHTTPProviderWithFallback(routeBaseURLs, cfg.RouteLookupTimeout)
 	if err != nil {
 		log.Fatalf("failed to construct route provider: %v", err)
 	}

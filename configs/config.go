@@ -11,71 +11,75 @@ import (
 )
 
 type Config struct {
-	ListenHost           string
-	HealthPort           int
-	PublicPortRangeStart int
-	PublicPortRangeEnd   int
-	TunnelManagerBaseURL string
-	RouteLookupTimeout   time.Duration
-	IdleTimeout          time.Duration
-	StartupTimeout       time.Duration
-	LocalPortRangeStart  int
-	LocalPortRangeEnd    int
-	LogFormat            string // plain | json
-	RestartBackoff       time.Duration
-	MaxRestarts          int
+	ListenHost                string
+	HealthPort                int
+	PublicPortRangeStart      int
+	PublicPortRangeEnd        int
+	LocalTunnelManagerBaseURL string
+	TunnelManagerBaseURL      string
+	RouteLookupTimeout        time.Duration
+	IdleTimeout               time.Duration
+	StartupTimeout            time.Duration
+	LocalPortRangeStart       int
+	LocalPortRangeEnd         int
+	LogFormat                 string // plain | json
+	RestartBackoff            time.Duration
+	MaxRestarts               int
 }
 
 const (
-	defaultListenHost           = ""
-	defaultHealthPort           = 29999
-	defaultPublicPortRangeStart = 30000
-	defaultPublicPortRangeEnd   = 30499
-	defaultTunnelManagerBaseURL = "https://1f8b266e9dbf.ratio1.link"
-	defaultRouteLookupTimeout   = 5 * time.Second
-	defaultIdleTimeout          = 300 * time.Second
-	defaultStartupTimeout       = 15 * time.Second
-	defaultLocalPortRangeStart  = 20000
-	defaultLocalPortRangeEnd    = 20100
-	defaultLogFormat            = "plain"
-	defaultRestartBackoff       = 2 * time.Second
-	defaultMaxRestarts          = 3
-	maxTCPPort                  = 65535
+	defaultListenHost                = ""
+	defaultHealthPort                = 29999
+	defaultPublicPortRangeStart      = 30000
+	defaultPublicPortRangeEnd        = 30499
+	defaultLocalTunnelManagerBaseURL = "http://172.17.0.2:31033"
+	defaultTunnelManagerBaseURL      = "https://e01ce7651298.ratio1.link"
+	defaultRouteLookupTimeout        = 5 * time.Second
+	defaultIdleTimeout               = 300 * time.Second
+	defaultStartupTimeout            = 15 * time.Second
+	defaultLocalPortRangeStart       = 20000
+	defaultLocalPortRangeEnd         = 20100
+	defaultLogFormat                 = "plain"
+	defaultRestartBackoff            = 2 * time.Second
+	defaultMaxRestarts               = 3
+	maxTCPPort                       = 65535
 )
 
 const (
-	envListenHost           = "LISTEN_HOST"
-	envHealthPort           = "HEALTH_PORT"
-	envPublicPortRangeStart = "PUBLIC_PORT_RANGE_START"
-	envPublicPortRangeEnd   = "PUBLIC_PORT_RANGE_END"
-	envTunnelManagerBaseURL = "TUNNEL_MANAGER_BASE_URL"
-	envRouteLookupTimeout   = "ROUTE_LOOKUP_TIMEOUT"
-	envIdleTimeout          = "IDLE_TIMEOUT"
-	envStartupTimeout       = "STARTUP_TIMEOUT"
-	envLocalPortRangeStart  = "LOCAL_PORT_RANGE_START"
-	envLocalPortRangeEnd    = "LOCAL_PORT_RANGE_END"
-	envLogFormat            = "LOG_FORMAT"
-	envRestartBackoff       = "RESTART_BACKOFF"
-	envMaxRestarts          = "MAX_RESTARTS"
+	envListenHost                = "LISTEN_HOST"
+	envHealthPort                = "HEALTH_PORT"
+	envPublicPortRangeStart      = "PUBLIC_PORT_RANGE_START"
+	envPublicPortRangeEnd        = "PUBLIC_PORT_RANGE_END"
+	envLocalTunnelManagerBaseURL = "LOCAL_TUNNEL_MANAGER_BASE_URL"
+	envTunnelManagerBaseURL      = "TUNNEL_MANAGER_BASE_URL"
+	envRouteLookupTimeout        = "ROUTE_LOOKUP_TIMEOUT"
+	envIdleTimeout               = "IDLE_TIMEOUT"
+	envStartupTimeout            = "STARTUP_TIMEOUT"
+	envLocalPortRangeStart       = "LOCAL_PORT_RANGE_START"
+	envLocalPortRangeEnd         = "LOCAL_PORT_RANGE_END"
+	envLogFormat                 = "LOG_FORMAT"
+	envRestartBackoff            = "RESTART_BACKOFF"
+	envMaxRestarts               = "MAX_RESTARTS"
 )
 
 // LoadConfigFromEnv returns configuration populated from environment variables, falling back to defaults.
 // It returns validation/parse errors so callers can decide how to handle them.
 func LoadConfigFromEnv() (Config, error) {
 	cfg := Config{
-		ListenHost:           defaultListenHost,
-		HealthPort:           defaultHealthPort,
-		PublicPortRangeStart: defaultPublicPortRangeStart,
-		PublicPortRangeEnd:   defaultPublicPortRangeEnd,
-		TunnelManagerBaseURL: defaultTunnelManagerBaseURL,
-		RouteLookupTimeout:   defaultRouteLookupTimeout,
-		IdleTimeout:          defaultIdleTimeout,
-		StartupTimeout:       defaultStartupTimeout,
-		LocalPortRangeStart:  defaultLocalPortRangeStart,
-		LocalPortRangeEnd:    defaultLocalPortRangeEnd,
-		LogFormat:            defaultLogFormat,
-		RestartBackoff:       defaultRestartBackoff,
-		MaxRestarts:          defaultMaxRestarts,
+		ListenHost:                defaultListenHost,
+		HealthPort:                defaultHealthPort,
+		PublicPortRangeStart:      defaultPublicPortRangeStart,
+		PublicPortRangeEnd:        defaultPublicPortRangeEnd,
+		LocalTunnelManagerBaseURL: defaultLocalTunnelManagerBaseURL,
+		TunnelManagerBaseURL:      defaultTunnelManagerBaseURL,
+		RouteLookupTimeout:        defaultRouteLookupTimeout,
+		IdleTimeout:               defaultIdleTimeout,
+		StartupTimeout:            defaultStartupTimeout,
+		LocalPortRangeStart:       defaultLocalPortRangeStart,
+		LocalPortRangeEnd:         defaultLocalPortRangeEnd,
+		LogFormat:                 defaultLogFormat,
+		RestartBackoff:            defaultRestartBackoff,
+		MaxRestarts:               defaultMaxRestarts,
 	}
 
 	var errs []error
@@ -113,6 +117,10 @@ func LoadConfigFromEnv() (Config, error) {
 
 	if v := strings.TrimSpace(os.Getenv(envTunnelManagerBaseURL)); v != "" {
 		cfg.TunnelManagerBaseURL = v
+	}
+
+	if v, ok := os.LookupEnv(envLocalTunnelManagerBaseURL); ok {
+		cfg.LocalTunnelManagerBaseURL = strings.TrimSpace(v)
 	}
 
 	if v := strings.TrimSpace(os.Getenv(envRouteLookupTimeout)); v != "" {

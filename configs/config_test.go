@@ -22,6 +22,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.PublicPortRangeStart != defaultPublicPortRangeStart || cfg.PublicPortRangeEnd != defaultPublicPortRangeEnd {
 		t.Fatalf("PublicPortRange: got %d-%d, want %d-%d", cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd, defaultPublicPortRangeStart, defaultPublicPortRangeEnd)
 	}
+	if cfg.LocalTunnelManagerBaseURL != defaultLocalTunnelManagerBaseURL {
+		t.Fatalf("LocalTunnelManagerBaseURL: got %q, want %q", cfg.LocalTunnelManagerBaseURL, defaultLocalTunnelManagerBaseURL)
+	}
 	if cfg.TunnelManagerBaseURL != defaultTunnelManagerBaseURL {
 		t.Fatalf("TunnelManagerBaseURL: got %q, want %q", cfg.TunnelManagerBaseURL, defaultTunnelManagerBaseURL)
 	}
@@ -48,6 +51,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv(envHealthPort, "29998")
 	t.Setenv(envPublicPortRangeStart, "35000")
 	t.Setenv(envPublicPortRangeEnd, "35010")
+	t.Setenv(envLocalTunnelManagerBaseURL, "http://127.0.0.1:31033")
 	t.Setenv(envTunnelManagerBaseURL, "https://tunnel-manager.example.com")
 	t.Setenv(envRouteLookupTimeout, "4s")
 	t.Setenv(envIdleTimeout, "42s")
@@ -71,6 +75,9 @@ func TestLoadConfigOverrides(t *testing.T) {
 	}
 	if cfg.PublicPortRangeStart != 35000 || cfg.PublicPortRangeEnd != 35010 {
 		t.Fatalf("PublicPortRange override failed, got %d-%d", cfg.PublicPortRangeStart, cfg.PublicPortRangeEnd)
+	}
+	if cfg.LocalTunnelManagerBaseURL != "http://127.0.0.1:31033" {
+		t.Fatalf("LocalTunnelManagerBaseURL override failed, got %q", cfg.LocalTunnelManagerBaseURL)
 	}
 	if cfg.TunnelManagerBaseURL != "https://tunnel-manager.example.com" {
 		t.Fatalf("TunnelManagerBaseURL override failed, got %q", cfg.TunnelManagerBaseURL)
@@ -183,12 +190,26 @@ func TestLoadConfigRejectsPortsAboveTCPMaximum(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAllowsDisablingLocalTunnelManager(t *testing.T) {
+	unsetAllEnv(t)
+	t.Setenv(envLocalTunnelManagerBaseURL, "")
+
+	cfg, err := LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("expected no error when local tunnel manager URL is disabled, got %v", err)
+	}
+	if cfg.LocalTunnelManagerBaseURL != "" {
+		t.Fatalf("LocalTunnelManagerBaseURL should be disabled, got %q", cfg.LocalTunnelManagerBaseURL)
+	}
+}
+
 func unsetAllEnv(t *testing.T) {
 	t.Helper()
 	os.Unsetenv(envListenHost)
 	os.Unsetenv(envHealthPort)
 	os.Unsetenv(envPublicPortRangeStart)
 	os.Unsetenv(envPublicPortRangeEnd)
+	os.Unsetenv(envLocalTunnelManagerBaseURL)
 	os.Unsetenv(envTunnelManagerBaseURL)
 	os.Unsetenv(envRouteLookupTimeout)
 	os.Unsetenv(envIdleTimeout)

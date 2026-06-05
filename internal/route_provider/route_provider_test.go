@@ -94,6 +94,47 @@ func TestHTTPProviderDoesNotCacheFailures(t *testing.T) {
 	}
 }
 
+func TestHTTPProviderFallsBackAndCachesSuccessfulLookup(t *testing.T) {
+	var localHits int32
+	localServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&localHits, 1)
+		http.Error(w, "local route unavailable", http.StatusNotFound)
+	}))
+	defer localServer.Close()
+
+	var publicHits int32
+	publicServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&publicHits, 1)
+		if got := r.URL.Query().Get("public_port"); got != "30005" {
+			t.Errorf("public_port query = %q, want 30005", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "origin.ratio1.link"})
+	}))
+	defer publicServer.Close()
+
+	provider, err := NewHTTPProviderWithFallback([]string{localServer.URL, publicServer.URL}, time.Second)
+	if err != nil {
+		t.Fatalf("NewHTTPProviderWithFallback returned error: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		hostname, err := provider.GetHostname(context.Background(), 30005)
+		if err != nil {
+			t.Fatalf("GetHostname returned error: %v", err)
+		}
+		if hostname != "origin.ratio1.link" {
+			t.Fatalf("hostname = %q, want origin.ratio1.link", hostname)
+		}
+	}
+
+	if got := atomic.LoadInt32(&localHits); got != 1 {
+		t.Fatalf("local route lookup hits = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&publicHits); got != 1 {
+		t.Fatalf("public route lookup hits = %d, want 1", got)
+	}
+}
+
 func TestHTTPProviderDoesNotCacheInvalidHostnames(t *testing.T) {
 	var hits int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

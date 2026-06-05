@@ -3,6 +3,7 @@ package routeprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,28 +16,47 @@ import (
 )
 
 type HTTPProvider struct {
-	baseURL string
-	client  *http.Client
-	timeout time.Duration
-	mu      sync.Mutex
-	cache   map[int]string
+	baseURLs []string
+	client   *http.Client
+	timeout  time.Duration
+	mu       sync.Mutex
+	cache    map[int]string
 }
 
 func NewHTTPProvider(baseURL string, timeout time.Duration) (*HTTPProvider, error) {
-	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	parsed, err := url.Parse(normalized)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("invalid tunnel manager base URL %q", baseURL)
+	return NewHTTPProviderWithFallback([]string{baseURL}, timeout)
+}
+
+func NewHTTPProviderWithFallback(baseURLs []string, timeout time.Duration) (*HTTPProvider, error) {
+	normalizedURLs := make([]string, 0, len(baseURLs))
+	for _, baseURL := range baseURLs {
+		normalized, err := normalizeBaseURL(baseURL)
+		if err != nil {
+			return nil, err
+		}
+		normalizedURLs = append(normalizedURLs, normalized)
+	}
+	if len(normalizedURLs) == 0 {
+		return nil, fmt.Errorf("at least one tunnel manager base URL is required")
 	}
 	if timeout <= 0 {
 		return nil, fmt.Errorf("route lookup timeout must be positive")
 	}
 	return &HTTPProvider{
-		baseURL: normalized,
-		client:  &http.Client{},
-		timeout: timeout,
-		cache:   make(map[int]string),
+		baseURLs: normalizedURLs,
+		client:   &http.Client{},
+		timeout:  timeout,
+		cache:    make(map[int]string),
 	}, nil
+}
+
+func normalizeBaseURL(baseURL string) (string, error) {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	parsed, err := url.Parse(normalized)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid tunnel manager base URL %q", baseURL)
+	}
+	return normalized, nil
 }
 
 func (p *HTTPProvider) GetHostname(ctx context.Context, publicPort int) (string, error) {
@@ -51,10 +71,26 @@ func (p *HTTPProvider) GetHostname(ctx context.Context, publicPort int) (string,
 	}
 	p.mu.Unlock()
 
+	var lookupErrors []error
+	for _, baseURL := range p.baseURLs {
+		hostname, err := p.lookupHostname(ctx, baseURL, publicPort)
+		if err == nil {
+			p.mu.Lock()
+			p.cache[publicPort] = hostname
+			p.mu.Unlock()
+			return hostname, nil
+		}
+		lookupErrors = append(lookupErrors, err)
+	}
+
+	return "", fmt.Errorf("tcp route lookup failed for port %d: %w", publicPort, errors.Join(lookupErrors...))
+}
+
+func (p *HTTPProvider) lookupHostname(ctx context.Context, baseURL string, publicPort int) (string, error) {
 	lookupCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	u, err := url.Parse(p.baseURL + "/get_tcp_route")
+	u, err := url.Parse(baseURL + "/get_tcp_route")
 	if err != nil {
 		return "", err
 	}
@@ -69,22 +105,19 @@ func (p *HTTPProvider) GetHostname(ctx context.Context, publicPort int) (string,
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s: %w", baseURL, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("tcp route lookup for port %d failed with status %d", publicPort, resp.StatusCode)
+		return "", fmt.Errorf("%s: tcp route lookup for port %d failed with status %d", baseURL, publicPort, resp.StatusCode)
 	}
 
 	hostname, err := decodeHostname(resp)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%s: %w", baseURL, err)
 	}
 
-	p.mu.Lock()
-	p.cache[publicPort] = hostname
-	p.mu.Unlock()
 	return hostname, nil
 }
 

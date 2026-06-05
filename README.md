@@ -6,7 +6,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 
 -   Listens on every public port in `PUBLIC_PORT_RANGE_START`-`PUBLIC_PORT_RANGE_END` (`30000`-`30499` by default).
 -   Listens on `HEALTH_PORT` (`29999` by default) and returns `success` without route lookup or tunnel startup.
--   Resolves routes through tunnel manager `get_tcp_route(public_port)`.
+-   Resolves routes through local tunnel manager `get_tcp_route(public_port)` first, then falls back to the public tunnel manager API.
 -   Caches successful route lookups in memory for the process lifetime.
 -   Starts one local `cloudflared access tcp --hostname <origin>` process per origin hostname.
 -   Full-duplex raw TCP piping with no TLS, SNI, PROXY, or protocol pre-parsing.
@@ -51,7 +51,8 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
     Environment=HEALTH_PORT=29999
     Environment=PUBLIC_PORT_RANGE_START=30000
     Environment=PUBLIC_PORT_RANGE_END=30499
-    Environment=TUNNEL_MANAGER_BASE_URL=https://1f8b266e9dbf.ratio1.link
+    Environment=LOCAL_TUNNEL_MANAGER_BASE_URL=http://172.17.0.2:31033
+    Environment=TUNNEL_MANAGER_BASE_URL=https://e01ce7651298.ratio1.link
     Environment=LOCAL_PORT_RANGE_START=20000
     Environment=LOCAL_PORT_RANGE_END=20100
     Environment=LOG_FORMAT=plain
@@ -72,6 +73,7 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 ## Behavior Notes
 
 -   Route source of truth: tunnel manager owns the ChainStore port registry. This proxy only calls `get_tcp_route(public_port)`.
+-   Route lookup order: the proxy tries `LOCAL_TUNNEL_MANAGER_BASE_URL` first, then `TUNNEL_MANAGER_BASE_URL`. Set `LOCAL_TUNNEL_MANAGER_BASE_URL` to an empty value to disable local lookup.
 -   Health checks: connections to `HEALTH_PORT` receive `success` and close; the health port must not overlap the public port range.
 -   Cache behavior: successful port lookups are cached indefinitely for this process. Route deletion or port reuse can require a proxy restart until invalidation exists.
 -   Cloudflared lifecycle: starts on first connection per origin hostname, waits for local port readiness, increments refcounts, and tears down idle tunnels after `IDLE_TIMEOUT`.
@@ -82,7 +84,8 @@ Port-based TCP proxy for Cloudflare Access tunnels. It listens on the configured
 -   `LISTEN_HOST`: host/interface to bind (empty means all interfaces).
 -   `HEALTH_PORT`: TCP health-check port that returns `success` without route lookup or tunnel startup (default `29999`).
 -   `PUBLIC_PORT_RANGE_START` / `PUBLIC_PORT_RANGE_END`: public ports to listen on.
--   `TUNNEL_MANAGER_BASE_URL`: tunnel manager API base URL.
+-   `LOCAL_TUNNEL_MANAGER_BASE_URL`: local tunnel manager API base URL tried first (default `http://172.17.0.2:31033`).
+-   `TUNNEL_MANAGER_BASE_URL`: public tunnel manager API fallback base URL.
 -   `ROUTE_LOOKUP_TIMEOUT`: timeout for `get_tcp_route` requests (default `5s`).
 -   `IDLE_TIMEOUT`: duration before idle tunnels are torn down (default `300s`).
 -   `STARTUP_TIMEOUT`: how long to wait for `cloudflared` to become ready (default `15s`).
